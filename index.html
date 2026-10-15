@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffb088">
+<title>Thanks for the 🍑</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍑</text></svg>">
+<style>
+  body { margin: 0; background: #ffb088; }
+  .s { height: 100vh; height: 100lvh; scroll-snap-align: start; }
+  @media (pointer: coarse) { html { scroll-snap-type: y proximity; } }
+  #land, .hero { position: fixed; inset: 0; width: 100%; height: 100%; }
+  .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vmin; padding: 0 1rem; box-sizing: border-box; pointer-events: none; }
+  #peach { width: min(48vmin, 420px); aspect-ratio: 1; }
+  h1 { margin: 0; text-align: center; color: #fff; letter-spacing: -.02em;
+       font: 700 clamp(2rem, 7vw, 5.5rem)/1.1 system-ui, -apple-system, "Segoe UI", sans-serif;
+       text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
+</style>
+</head>
+<body>
+<canvas id="land" aria-hidden="true"></canvas>
+<div class="hero"><canvas id="peach" aria-hidden="true"></canvas><h1>Thanks for the 🍑</h1></div>
+<script>
+'use strict';
+const N = 6, TAU = Math.PI * 2;
+const coarse = matchMedia('(pointer: coarse)').matches;          // phone/tablet mode: tilt parallax, snap, lower DPR
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches; // only scroll moves things
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const smooth = t => t * t * (3 - 2 * t);
+const lerp = (a, b, t) => typeof a == 'number' ? a + (b - a) * t
+  : Array.isArray(a) ? a.map((v, i) => lerp(v, b[i], t))
+  : Object.fromEntries(Object.keys(a).map(k => [k, lerp(a[k], b[k], t)]));
+const rgb = c => `rgb(${c.slice(0, 3).map(Math.round)})`;
+const rgba = (c, a) => `rgba(${c.slice(0, 3).map(Math.round)},${a})`;
+
+// One scene per screen of scroll. sky: [top, bottom] rgb. sun: [r,g,b, x, y, radius, glow].
+// layers far→near: [r,g,b, amplitude, frequency, baseline] as fractions of the viewport.
+const SCENES = [
+  { sky: [[255, 150, 125], [255, 225, 190]], sun: [255, 245, 220, .5, .62, .05, .6], haze: [255, 205, 180], stars: 0,
+    layers: [[160, 115, 150, .24, 1.1, .52], [125, 85, 125, .20, 1.5, .62], [95, 60, 100, .16, 2.1, .72], [65, 40, 75, .11, 3.0, .84]] },
+  { sky: [[90, 160, 240], [205, 232, 250]], sun: [255, 255, 235, .72, .16, .045, .3], haze: [200, 225, 240], stars: 0,
+    layers: [[120, 170, 95, .12, .8, .58], [85, 145, 70, .14, 1.2, .66], [60, 120, 55, .15, 1.7, .76], [40, 95, 45, .13, 2.4, .88]] },
+  { sky: [[245, 165, 85], [255, 228, 170]], sun: [255, 240, 200, .3, .5, .06, .7], haze: [255, 215, 160], stars: 0,
+    layers: [[235, 175, 105, .07, .5, .62], [215, 140, 80, .09, .7, .70], [195, 112, 62, .11, .9, .79], [168, 88, 52, .13, 1.2, .90]] },
+  { sky: [[85, 55, 130], [255, 145, 120]], sun: [255, 200, 150, .5, .66, .07, .8], haze: [230, 130, 140], stars: .2,
+    layers: [[90, 55, 120, .10, 1.4, .64], [60, 50, 125, .012, 3, .70], [48, 40, 105, .012, 4, .80], [35, 30, 80, .012, 5, .91]] },
+  { sky: [[6, 10, 38], [32, 32, 85]], sun: [235, 238, 255, .74, .2, .035, .35], haze: [40, 45, 95], stars: 1,
+    layers: [[32, 42, 75, .20, 1.5, .55], [22, 30, 58, .18, 2.0, .64], [14, 20, 42, .16, 3.0, .74], [7, 10, 24, .12, 5.0, .86]] },
+  { sky: [[110, 80, 160], [255, 185, 140]], sun: [255, 225, 190, .5, .7, .06, .9], haze: [240, 170, 160], stars: .3,
+    layers: [[125, 90, 155, .22, 1.1, .54], [100, 70, 130, .18, 1.5, .63], [78, 52, 108, .14, 2.0, .73], [55, 36, 85, .10, 2.8, .85]] },
+];
+console.assert(!JSON.stringify(SCENES.map((s, i) => lerp(s, SCENES[(i + 1) % N], .5))).includes('null'), 'scene shapes differ');
+
+const hash = n => { const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+const noise = (x, s) => { const i = Math.floor(x), u = smooth(x - i); return hash(i + s) * (1 - u) + hash(i + 1 + s) * u; };
+const fbm = (x, s) => { let v = 0, a = .5; for (let o = 0; o < 4; o++, x *= 2.1, a *= .5) v += a * noise(x, s + o * 31); return v; };
+const height = (si, k, x, off) => { const [, , , amp, freq, base] = SCENES[si].layers[k]; return H * (base - amp * fbm((x + off) / SX * freq * 3, si * 97 + k * 13)); };
+
+const land = document.getElementById('land'), g = land.getContext('2d');
+const peach = document.getElementById('peach');
+const STARS = Array.from({ length: 160 }, () => [Math.random(), Math.random(), .4 + Math.random() * 1.2, Math.random() * TAU]);
+let W, H, SX, p = 0, pc = 0, px = 0, py = 0, pxc = 0, pyc = 0;
+
+function draw(t) {
+  const q = clamp(pc, 0, N - 1), i = Math.min(N - 2, Math.floor(q)), j = i + 1, f = smooth(q - i);
+  const s = lerp(SCENES[i], SCENES[j], f);
+  const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, rgb(s.sky[0])); sky.addColorStop(1, rgb(s.sky[1]));
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  if (s.stars > .01) {
+    g.fillStyle = '#fff';
+    for (const [x, y, r, ph] of STARS) { g.globalAlpha = s.stars * (.55 + .45 * Math.sin(ph + (still ? 0 : t * 1.5))); g.beginPath(); g.arc(x * W, y * H * .65, r, 0, TAU); g.fill(); }
+    g.globalAlpha = 1;
+  }
+  const sun = s.sun, sx = W * sun[3] - pxc * 25, sy = H * sun[4] - pyc * 10, R = Math.min(W, H) * sun[5];
+  const glow = g.createRadialGradient(sx, sy, 0, sx, sy, R * 9); glow.addColorStop(0, rgba(sun, sun[6])); glow.addColorStop(1, rgba(sun, 0));
+  g.fillStyle = glow; g.fillRect(0, 0, W, H);
+  g.fillStyle = rgb(sun); g.beginPath(); g.arc(sx, sy, R, 0, TAU); g.fill();
+  for (let k = 0; k < 4; k++) {
+    const off = q * H * (.15 + .2 * k) + pxc * (12 + 22 * k) + (still ? 0 : t * 6 * (1 + k));
+    g.fillStyle = rgb(lerp(s.layers[k].slice(0, 3), s.haze, (3 - k) * .17)); g.beginPath(); g.moveTo(0, H);
+    for (let x = 0; x <= W + 3; x += 3) g.lineTo(x, lerp(height(i, k, x, off), height(j, k, x, off), f) - pyc * (4 + 6 * k));
+    g.lineTo(W + 3, H); g.fill();
+  }
+}
+
+// Ray-marched peach: squashed sphere with a crease and a top dimple, a stem and one leaf.
+const FS = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 R;uniform float T;uniform vec2 A;
+mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
+float cap(vec3 p,vec3 a,vec3 b,float r){vec3 pa=p-a,ba=b-a;float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);return length(pa-ba*h)-r;}
+float ell(vec3 p,vec3 r){float k0=length(p/r),k1=length(p/(r*r));return k0*(k0-1.)/k1;}
+float groove(vec3 p){return exp(-p.x*p.x*50.)*smoothstep(-.3,.5,p.z)*smoothstep(-1.,.3,p.y);}
+vec2 map(vec3 p){
+  float d=length(p*vec3(1.,.96,1.))-1.+.06*groove(p)+.12*exp(-dot(p.xz,p.xz)*10.)*smoothstep(.2,1.,p.y);
+  vec2 r=vec2(d,0.);
+  float s=cap(p,vec3(0.,.75,0.),vec3(.04,1.2,0.),.05);if(s<r.x)r=vec2(s,1.);
+  vec3 q=p-vec3(.36,1.08,.06);q.xy=rot(.55)*q.xy;float l=ell(q,vec3(.36,.16,.07));if(l<r.x)r=vec2(l,2.);
+  return r;
+}
+vec3 nor(vec3 p){vec2 e=vec2(.002,0.);return normalize(vec3(map(p+e.xyy).x-map(p-e.xyy).x,map(p+e.yxy).x-map(p-e.yxy).x,map(p+e.yyx).x-map(p-e.yyx).x));}
+void main(){
+  vec2 uv=(2.*gl_FragCoord.xy-R)/R.y;
+  vec3 rdc=normalize(vec3(uv,-2.6)),ro=vec3(0.,.1,3.6),rd=rdc;
+  ro.yz=rot(A.y)*ro.yz;rd.yz=rot(A.y)*rd.yz;ro.xz=rot(A.x)*ro.xz;rd.xz=rot(A.x)*rd.xz;
+  float b=dot(ro,rd),h=b*b-dot(ro,ro)+2.6;
+  if(h<0.){gl_FragColor=vec4(0.);return;}
+  float t=-b-sqrt(h),tend=-b+sqrt(h),tm=t,md=1e3;vec2 m=vec2(0.);
+  for(int i=0;i<72;i++){m=map(ro+rd*t);if(m.x<md){md=m.x;tm=t;}if(m.x<.0015||t>tend)break;t+=m.x*.85;}
+  bool hit=m.x<.0015;
+  float a=hit?1.:1.-smoothstep(0.,3./R.y,md);
+  if(a<=0.){gl_FragColor=vec4(0.);return;}
+  vec3 p=ro+rd*(hit?t:tm),n=nor(p);float id=map(p).y;
+  n.xz=rot(-A.x)*n.xz;n.yz=rot(-A.y)*n.yz;
+  vec3 L=normalize(vec3(-.6,.7,.8)),col;
+  if(id<.5){
+    col=mix(vec3(1.,.82,.40),vec3(.96,.36,.44),smoothstep(-1.2,1.,-p.y*.9+p.x*.6+.1));
+    col=mix(col,vec3(1.,.95,.6),.35*smoothstep(.2,1.,p.y));
+    col*=1.-.4*groove(p);
+  }else if(id<1.5)col=vec3(.42,.27,.14);
+  else col=vec3(.36,.68,.26);
+  float dif=clamp(dot(n,L),0.,1.);
+  float spe=pow(clamp(dot(n,normalize(L-rdc)),0.,1.),id<.5?18.:60.)*(id<.5?.3:.5);
+  float rim=pow(1.-clamp(dot(n,-rdc),0.,1.),3.);
+  col=col*(.4+.7*dif)+spe+rim*vec3(.3,.22,.2);
+  gl_FragColor=vec4(col*a,a);
+}`;
+let gl = null, uR, uT, uA;
+try {
+  gl = peach.getContext('webgl', { antialias: false });
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 v;void main(){gl_Position=vec4(v,0.,1.);}'));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const v = gl.getAttribLocation(pr, 'v'); gl.enableVertexAttribArray(v); gl.vertexAttribPointer(v, 2, gl.FLOAT, false, 0, 0);
+  uR = gl.getUniformLocation(pr, 'R'); uT = gl.getUniformLocation(pr, 'T'); uA = gl.getUniformLocation(pr, 'A');
+} catch (e) { console.error(e); gl = null; peach.hidden = true; } // no WebGL: landscape + text still work
+
+function frame(ms) {
+  const t = ms / 1000, e = still ? 1 : .08;
+  pc += (p - pc) * e; pxc += (px - pxc) * e; pyc += (py - pyc) * e;
+  draw(t);
+  if (gl) {
+    gl.viewport(0, 0, peach.width, peach.height);
+    gl.uniform2f(uR, peach.width, peach.height); gl.uniform1f(uT, t);
+    gl.uniform2f(uA, pc * Math.PI + pxc * .4 + (still ? 0 : t * .25), -pyc * .25); // half a turn per scene
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  requestAnimationFrame(frame);
+}
+const onScroll = () => p = scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight) * (N - 1);
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, coarse ? 1.5 : 2);
+  W = innerWidth; H = innerHeight; SX = Math.max(W, H);
+  land.width = Math.round(W * dpr); land.height = Math.round(H * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const r = peach.getBoundingClientRect(); peach.width = Math.round(r.width * dpr); peach.height = Math.round(r.height * dpr);
+  onScroll();
+}
+addEventListener('scroll', onScroll, { passive: true });
+addEventListener('resize', resize);
+addEventListener('pointermove', e => { if (e.pointerType == 'mouse') { px = e.clientX / W * 2 - 1; py = e.clientY / H * 2 - 1; } });
+addEventListener('deviceorientation', e => { if (e.gamma != null) { px = clamp(e.gamma / 30, -1, 1); py = clamp((e.beta - 45) / 30, -1, 1); } });
+// iOS only hands out tilt data after a permission call made from a touch
+addEventListener('touchend', function ask() { removeEventListener('touchend', ask); Promise.resolve(window.DeviceOrientationEvent?.requestPermission?.()).catch(() => {}); }, { passive: true });
+
+for (let i = 0; i < N; i++) document.body.append(Object.assign(document.createElement('div'), { className: 's' }));
+resize(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
