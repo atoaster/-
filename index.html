@@ -95,9 +95,10 @@ uniform vec2 R;uniform float T;uniform vec2 A;
 mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
 float cap(vec3 p,vec3 a,vec3 b,float r){vec3 pa=p-a,ba=b-a;float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);return length(pa-ba*h)-r;}
 float ell(vec3 p,vec3 r){float k0=length(p/r),k1=length(p/(r*r));return k0*(k0-1.)/k1;}
-float groove(vec3 p){return exp(-p.x*p.x*50.)*smoothstep(-.3,.5,p.z)*smoothstep(-1.,.3,p.y);}
+float groove(vec3 p){return exp(-p.x*p.x*32.)*smoothstep(-.3,.5,p.z)*smoothstep(-1.2,.1,p.y);}
 vec2 map(vec3 p){
-  float d=length(p*vec3(1.,.96,1.))-1.+.06*groove(p)+.12*exp(-dot(p.xz,p.xz)*10.)*smoothstep(.2,1.,p.y);
+  float ch=abs(p.x)-.45; // cheeks: a soft bulge either side of the crease
+  float d=length(p*vec3(.93,.98,.96))-1.+.1*groove(p)-.07*exp(-ch*ch*6.)*smoothstep(-.4,.6,p.z)+.12*exp(-dot(p.xz,p.xz)*10.)*smoothstep(.2,1.,p.y);
   vec2 r=vec2(d,0.);
   float s=cap(p,vec3(0.,.75,0.),vec3(.04,1.2,0.),.05);if(s<r.x)r=vec2(s,1.);
   vec3 q=p-vec3(.36,1.08,.06);q.xy=rot(.55)*q.xy;float l=ell(q,vec3(.36,.16,.07));if(l<r.x)r=vec2(l,2.);
