@@ -1,0 +1,13 @@
+# Explicit name: compose can't derive a valid project name from the emoji directory.
+name: thanks-for-the-peach
+
+services:
+  web:
+    image: busybox:stable
+    command: httpd -f -p 80 -u nobody -h /www
+    ports:
+      - "${PORT:-6969}:80"
+    volumes:
+      # shortcut: a single-file mount goes stale when an editor replaces the file, run `docker compose restart` after edits; bake an image once the app is more than one file.
+      - ./index.html:/www/index.html:ro
+    restart: unless-stopped
