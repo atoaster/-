@@ -16,11 +16,16 @@
   h1 { margin: 0; text-align: center; color: #fff; letter-spacing: -.02em;
        font: 700 clamp(2rem, 7vw, 5.5rem)/1.1 system-ui, -apple-system, "Segoe UI", sans-serif;
        text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
+  /* dark backing keeps the small text readable over every scene, including the pale desert */
+  #trivia { margin: 0; max-width: 34rem; padding: .6em 1.1em; border-radius: 1.2em; text-align: center; text-wrap: balance; color: #fff;
+            font: 500 clamp(.9rem, 2.2vw, 1.15rem)/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+            background: rgba(40, 22, 48, .65); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  #trivia:empty { display: none; }
 </style>
 </head>
 <body>
 <canvas id="land" aria-hidden="true"></canvas>
-<div class="hero"><canvas id="peach" aria-hidden="true"></canvas><h1>Thanks for the 🍑</h1></div>
+<div class="hero"><canvas id="peach" aria-hidden="true"></canvas><h1>Thanks for the 🍑</h1><p id="trivia"></p></div>
 <script>
 'use strict';
 const N = 6, TAU = Math.PI * 2;
@@ -33,6 +38,50 @@ const lerp = (a, b, t) => typeof a == 'number' ? a + (b - a) * t
   : Object.fromEntries(Object.keys(a).map(k => [k, lerp(a[k], b[k], t)]));
 const rgb = c => `rgb(${c.slice(0, 3).map(Math.round)})`;
 const rgba = (c, a) => `rgba(${c.slice(0, 3).map(Math.round)},${a})`;
+
+// Trivia lives in the page itself: no request, so it works wherever the page does.
+const TRIVIA = [
+  'Honey does not spoil. Jars found in ancient Egyptian tombs were still edible.',
+  'An octopus has three hearts and blue blood.',
+  'A day on Venus lasts longer than its year.',
+  'Botanically, a banana is a berry and a strawberry is not.',
+  'The Eiffel Tower grows up to 15 cm taller in summer heat.',
+  'Wombat droppings are cube-shaped.',
+  'Sharks have been around longer than trees.',
+  'Oxford University is older than the Aztec Empire.',
+  'A group of flamingos is called a flamboyance.',
+  'The national animal of Scotland is the unicorn.',
+  'The shortest war on record, between Britain and Zanzibar in 1896, lasted under 45 minutes.',
+  'A bolt of lightning is about five times hotter than the surface of the Sun.',
+  'There are more possible games of chess than atoms in the observable universe.',
+  'The dot over a lowercase i or j is called a tittle.',
+  'Cleopatra lived closer in time to the Moon landing than to the building of the Great Pyramid.',
+  'A koala has fingerprints that are hard to tell apart from a human’s.',
+  'Australia is wider than the Moon.',
+  'A butterfly tastes with its feet.',
+  'The designer of the Pringles can had some of his ashes buried in one.',
+  'Hummingbirds are the only birds that can fly backwards.',
+  'The Moon drifts about 3.8 cm further from Earth every year.',
+  'Sunlight takes a little over eight minutes to reach Earth.',
+  'There are more trees on Earth than stars in the Milky Way.',
+  'Sound travels more than four times faster in water than in air.',
+  'Antarctica is the largest desert in the world.',
+  'In medieval timekeeping, a moment was 90 seconds.',
+  'An average cumulus cloud weighs around 500 tonnes.',
+  '“Typewriter” can be typed using only the top row of a QWERTY keyboard.',
+  'The plastic tip of a shoelace is called an aglet.',
+  'Measured from base to peak, Mauna Kea is taller than Mount Everest.',
+  'Russia spans 11 time zones.',
+  'The national anthem of Spain has no official lyrics.',
+  'Saturn is less dense than water.',
+  'An Olympic gold medal is mostly silver.',
+  'The # symbol is also called an octothorpe.',
+  'A nectarine is a peach without the fuzz: same species, one gene apart.',
+];
+// A different fact every visit: step through the list, keeping the place in localStorage.
+let ti = Math.floor(Math.random() * TRIVIA.length); // first visit, or storage blocked: random pick
+try { const last = localStorage.getItem('trivia'); if (last != null) ti = (+last + 1) % TRIVIA.length || 0; localStorage.setItem('trivia', ti); } catch (e) {}
+document.getElementById('trivia').textContent = 'Did you know? ' + TRIVIA[ti];
 
 // One scene per screen of scroll. sky: [top, bottom] rgb. sun: [r,g,b, x, y, radius, glow].
 // layers far→near: [r,g,b, amplitude, frequency, baseline] as fractions of the viewport.
