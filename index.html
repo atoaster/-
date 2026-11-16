@@ -5,14 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffb088">
 <title>Thanks for the 🍑</title>
+<meta name="description" content="You gave me a peach. This is the thank-you.">
+<meta property="og:title" content="Thanks for the 🍑">
+<meta property="og:description" content="You gave me a peach. This is the thank-you.">
+<meta property="og:image" content="https://atoaster.github.io/-/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍑</text></svg>">
 <style>
   body { margin: 0; background: #ffb088; }
-  .s { height: 100vh; height: 100lvh; scroll-snap-align: start; }
+  /* one caption per scene, scrolling past the fixed hero; positioned so it paints above the canvases, click-through except the button */
+  .s { position: relative; height: 100vh; height: 100lvh; scroll-snap-align: start; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 1rem;
+       padding: 0 1rem max(7vh, env(safe-area-inset-bottom)); box-sizing: border-box; pointer-events: none; }
+  .s p { margin: 0; text-align: center; color: #fff; font: 600 clamp(1.1rem, 3.2vw, 1.6rem)/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
+  .s button { pointer-events: auto; cursor: pointer; border: 0; border-radius: 999px; padding: .9em 1.6em; background: #fff; color: #5a2d5a; font: 600 1rem system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+  .s p, .s button { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% entry 100%; } /* rises in as it scrolls into view; browsers without scroll timelines just show it */
+  @keyframes rise { from { opacity: 0; transform: translateY(1.5rem); } }
+  @media (max-height: 480px) { .s p, .s button { display: none; } } /* shortcut: captions would sit on top of the hero on short landscape phones, so they are hidden there; lay them out beside the peach if that matters */
   @media (pointer: coarse) { html { scroll-snap-type: y proximity; } }
   #land, .hero { position: fixed; inset: 0; width: 100%; height: 100%; }
   .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vmin; padding: 0 1rem; box-sizing: border-box; pointer-events: none; }
-  #peach { width: min(48vmin, 420px); aspect-ratio: 1; }
+  #peach { width: min(48vmin, 420px); aspect-ratio: 1; pointer-events: auto; touch-action: pan-y; cursor: pointer; }
   h1 { margin: 0; text-align: center; color: #fff; letter-spacing: -.02em;
        font: 700 clamp(2rem, 7vw, 5.5rem)/1.1 system-ui, -apple-system, "Segoe UI", sans-serif;
        text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
@@ -81,7 +94,7 @@ const TRIVIA = [
 // A different fact every visit: step through the list, keeping the place in localStorage.
 let ti = Math.floor(Math.random() * TRIVIA.length); // first visit, or storage blocked: random pick
 try { const last = localStorage.getItem('trivia'); if (last != null) ti = (+last + 1) % TRIVIA.length || 0; localStorage.setItem('trivia', ti); } catch (e) {}
-document.getElementById('trivia').textContent = 'Did you know? ' + TRIVIA[ti];
+const trivia = document.getElementById('trivia'), triviaText = 'Did you know? ' + TRIVIA[ti];
 
 // One scene per screen of scroll. sky: [top, bottom] rgb. sun: [r,g,b, x, y, radius, glow].
 // layers far→near: [r,g,b, amplitude, frequency, baseline] as fractions of the viewport.
@@ -140,7 +153,8 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-uniform vec2 R;uniform float T;uniform vec2 A;
+uniform vec2 R;uniform float T;uniform vec2 A;uniform vec3 B[7];uniform int NB;
+#define MAXB 7
 mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
 float cap(vec3 p,vec3 a,vec3 b,float r){vec3 pa=p-a,ba=b-a;float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);return length(pa-ba*h)-r;}
 float ell(vec3 p,vec3 r){float k0=length(p/r),k1=length(p/(r*r));return k0*(k0-1.)/k1;}
@@ -149,8 +163,13 @@ vec2 map(vec3 p){
   float ch=abs(p.x)-.45; // cheeks: a soft bulge either side of the crease
   float d=length(p*vec3(.93,.98,.96))-1.+.1*groove(p)-.07*exp(-ch*ch*6.)*smoothstep(-.4,.6,p.z)+.12*exp(-dot(p.xz,p.xz)*10.)*smoothstep(.2,1.,p.y);
   vec2 r=vec2(d,0.);
-  float s=cap(p,vec3(0.,.75,0.),vec3(.04,1.2,0.),.05);if(s<r.x)r=vec2(s,1.);
-  vec3 q=p-vec3(.36,1.08,.06);q.xy=rot(.55)*q.xy;float l=ell(q,vec3(.36,.16,.07));if(l<r.x)r=vec2(l,2.);
+  for(int i=0;i<MAXB;i++){if(i>=NB)break;float b=.42-length(p-B[i]);if(b>r.x)r=vec2(b,3.);} // bites: spheres taken out of the flesh
+  if(NB>=MAXB)r=vec2(1e3,0.); // eaten: body, stem and leaf are gone
+  else{
+    float s=cap(p,vec3(0.,.75,0.),vec3(.04,1.2,0.),.05);if(s<r.x)r=vec2(s,1.);
+    vec3 q=p-vec3(.36,1.08,.06);q.xy=rot(.55)*q.xy;float l=ell(q,vec3(.36,.16,.07));if(l<r.x)r=vec2(l,2.);
+  }
+  float k=ell(p,vec3(.3,.44,.22))+.012*sin(p.y*28.)*sin(p.x*24.+p.z*20.);if(k<r.x)r=vec2(k,4.); // the pit, wrinkled
   return r;
 }
 vec3 nor(vec3 p){vec2 e=vec2(.002,0.);return normalize(vec3(map(p+e.xyy).x-map(p-e.xyy).x,map(p+e.yxy).x-map(p-e.yxy).x,map(p+e.yyx).x-map(p-e.yyx).x));}
@@ -173,14 +192,16 @@ void main(){
     col=mix(col,vec3(1.,.95,.6),.35*smoothstep(.2,1.,p.y));
     col*=1.-.4*groove(p);
   }else if(id<1.5)col=vec3(.42,.27,.14);
-  else col=vec3(.36,.68,.26);
+  else if(id<2.5)col=vec3(.36,.68,.26);
+  else if(id<3.5)col=mix(vec3(.95,.45,.3),vec3(1.,.82,.4),smoothstep(.45,.7,length(p)))*(.45+.55*smoothstep(.6,1.05,length(p))); // flesh: redder and darker the deeper the bite goes
+  else col=vec3(.5,.28,.14);
   float dif=clamp(dot(n,L),0.,1.);
-  float spe=pow(clamp(dot(n,normalize(L-rdc)),0.,1.),id<.5?18.:60.)*(id<.5?.3:.5);
+  float spe=pow(clamp(dot(n,normalize(L-rdc)),0.,1.),id<.5?18.:id>3.5?8.:id>2.5?24.:60.)*(id<.5?.3:id>2.5?.12:.5);
   float rim=pow(1.-clamp(dot(n,-rdc),0.,1.),3.);
   col=col*(.4+.7*dif)+spe+rim*vec3(.3,.22,.2);
   gl_FragColor=vec4(col*a,a);
 }`;
-let gl = null, uR, uT, uA;
+let gl = null, uR, uT, uA, uB, uNB;
 try {
   gl = peach.getContext('webgl', { antialias: false });
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
@@ -189,8 +210,36 @@ try {
   gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
   const v = gl.getAttribLocation(pr, 'v'); gl.enableVertexAttribArray(v); gl.vertexAttribPointer(v, 2, gl.FLOAT, false, 0, 0);
-  uR = gl.getUniformLocation(pr, 'R'); uT = gl.getUniformLocation(pr, 'T'); uA = gl.getUniformLocation(pr, 'A');
+  uR = gl.getUniformLocation(pr, 'R'); uT = gl.getUniformLocation(pr, 'T'); uA = gl.getUniformLocation(pr, 'A'); uB = gl.getUniformLocation(pr, 'B'); uNB = gl.getUniformLocation(pr, 'NB');
 } catch (e) { console.error(e); gl = null; peach.hidden = true; } // no WebGL: landscape + text still work
+
+// Bites: tap the peach to take one. Centres live in peach space and are remembered, so the peach stays bitten on the next visit.
+const MAXB = +FS.match(/#define MAXB (\d+)/)[1], bitesArr = new Float32Array(3 * MAXB);
+let bites = [], A = [0, 0]; // A: camera angles of the last drawn frame
+try { bites = JSON.parse(localStorage.getItem('bites')) || []; } catch (e) {}
+if (!Array.isArray(bites) || !bites.every(b => Array.isArray(b) && b.length == 3 && b.every(Number.isFinite))) bites = []; // garbage in storage
+bites = bites.slice(0, MAXB);
+function saveBites() {
+  bitesArr.fill(0); bitesArr.set(bites.flat());
+  try { localStorage.setItem('bites', JSON.stringify(bites)); } catch (e) {}
+  trivia.textContent = gl && bites.length >= MAXB ? 'All gone. Tap the pit for another.' : triviaText;
+}
+saveBites();
+const rot2 = (x, y, a) => [Math.cos(a) * x + Math.sin(a) * y, Math.cos(a) * y - Math.sin(a) * x]; // same rot() as the shader
+peach.addEventListener('click', e => {
+  if (!gl) return;
+  if (bites.length >= MAXB) { bites = []; saveBites(); return; } // tapping the pit grows a fresh peach
+  // the tap as a ray in peach space, through the shader's camera; a sphere of radius 1.05 stands in for the peach
+  const r = peach.getBoundingClientRect(), ux = (e.clientX - r.left) / r.width * 2 - 1, uy = 1 - (e.clientY - r.top) / r.height * 2, len = Math.hypot(ux, uy, 2.6);
+  const ro = [0, .1, 3.6], rd = [ux / len, uy / len, -2.6 / len];
+  [ro[1], ro[2]] = rot2(ro[1], ro[2], A[1]); [rd[1], rd[2]] = rot2(rd[1], rd[2], A[1]);
+  [ro[0], ro[2]] = rot2(ro[0], ro[2], A[0]); [rd[0], rd[2]] = rot2(rd[0], rd[2], A[0]);
+  const b = ro[0] * rd[0] + ro[1] * rd[1] + ro[2] * rd[2], h = b * b - (ro[0] ** 2 + ro[1] ** 2 + ro[2] ** 2) + 1.1;
+  if (h < 0) return; // missed the peach
+  const t = -b - Math.sqrt(h), depth = 1.12 - .05 * bites.length; // each bite goes a little deeper, the last ones reach the pit
+  bites.push(ro.map((o, i) => +((o + rd[i] * t) * depth).toFixed(3)));
+  saveBites(); navigator.vibrate?.(15);
+});
 
 function frame(ms) {
   const t = ms / 1000, e = still ? 1 : .08;
@@ -199,7 +248,8 @@ function frame(ms) {
   if (gl) {
     gl.viewport(0, 0, peach.width, peach.height);
     gl.uniform2f(uR, peach.width, peach.height); gl.uniform1f(uT, t);
-    gl.uniform2f(uA, pc * Math.PI + pxc * .4 + (still ? 0 : t * .25), -pyc * .25); // half a turn per scene
+    A = [pc * Math.PI + pxc * .4 + (still ? 0 : t * .25), -pyc * .25]; // half a turn per scene
+    gl.uniform2f(uA, A[0], A[1]); gl.uniform3fv(uB, bitesArr); gl.uniform1i(uNB, bites.length);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   requestAnimationFrame(frame);
@@ -219,7 +269,14 @@ addEventListener('deviceorientation', e => { if (e.gamma != null) { px = clamp(e
 // iOS only hands out tilt data after a permission call made from a touch
 addEventListener('touchend', function ask() { removeEventListener('touchend', ask); Promise.resolve(window.DeviceOrientationEvent?.requestPermission?.()).catch(() => {}); }, { passive: true });
 
-for (let i = 0; i < N; i++) document.body.append(Object.assign(document.createElement('div'), { className: 's' }));
+const LINES = [gl ? 'Take a bite, then scroll.' : 'Scroll on.', 'You gave me a peach.', 'It was a good peach.', 'Ripe, sweet, gone in a minute.', 'I wanted you to know.', 'Thank you.'];
+console.assert(LINES.length == N, 'one line per scene');
+for (let i = 0; i < N; i++) { const s = document.body.appendChild(document.createElement('div')); s.className = 's'; s.innerHTML = `<p>${LINES[i]}</p>` + (i == N - 1 ? '<button id="share" type="button">Pass it on</button>' : ''); }
+document.getElementById('share').onclick = async function () {
+  const url = location.origin + location.pathname;
+  if (navigator.share) return navigator.share({ title: document.title, url }).catch(() => {}); // closing the share sheet is not an error
+  try { await navigator.clipboard.writeText(url); this.textContent = 'Link copied'; } catch (e) { prompt('Copy this link', url); } // no clipboard on plain http
+};
 resize(); requestAnimationFrame(frame);
 </script>
 </body>
