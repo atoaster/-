@@ -41,11 +41,13 @@
   #peach { width: min(48vmin, 420px); aspect-ratio: 1; transition: opacity .5s; }
   /* What a finger or the mouse takes hold of, to turn the peach or to bite it, is not the canvas, whose corners are empty, but a circle laid over the fruit:
      the outline of the peach's body, which is the same from every side. There the browser must not scroll along with the finger, and is left only the
-     two-finger pinch. A finger put down anywhere else, right beside the fruit included, scrolls the page as ever. The circle takes up no room of its
-     own: its margins draw it up over the canvas, and make good below it what it stands on. */
-  #grip { flex: none; --s: min(48vmin, 420px); width: calc(var(--s) * .792); height: calc(var(--s) * .792); margin: calc(var(--s) * -.86 - 2vmin) 0 calc(var(--s) * .068);
-          border-radius: 50%; pointer-events: auto; touch-action: pinch-zoom; cursor: grab; }
-  #grip.held { cursor: grabbing; }
+     two-finger pinch. A finger put down anywhere else, right beside the fruit included, scrolls the page as ever. #grip itself is a line of no height
+     under the canvas (its margin takes back the gap it would add, to the last fraction of a pixel); the circle stands on it. */
+  #grip { flex: none; position: relative; --s: min(48vmin, 420px); width: var(--s); height: 0; margin-top: -2vmin; touch-action: pinch-zoom;
+          user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  #grip::before { content: ''; position: absolute; left: calc(var(--s) * .104); bottom: calc(var(--s) * .068); width: calc(var(--s) * .792); height: calc(var(--s) * .792);
+                  border-radius: 50%; pointer-events: auto; cursor: grab; }
+  #grip.held::before { cursor: grabbing; }
   @media (prefers-reduced-motion: reduce) { #peach { transition: none; } }
   h1 { margin: 0; text-align: center; color: #fff; letter-spacing: -.02em;
        font: 700 clamp(2rem, 7vw, 5.5rem)/1.1 system-ui, -apple-system, "Segoe UI", sans-serif;
