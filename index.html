@@ -43,7 +43,7 @@
 <script>
 'use strict';
 const N = 6, TAU = Math.PI * 2;
-const coarse = matchMedia('(pointer: coarse)').matches;          // phone/tablet mode: tilt parallax, snap, lower DPR
+const coarse = matchMedia('(pointer: coarse)').matches;          // phone/tablet mode: snap, lower DPR
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches; // only scroll moves things
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = t => t * t * (3 - 2 * t);
@@ -509,10 +509,7 @@ function resize() {
 }
 addEventListener('scroll', onScroll, { passive: true });
 addEventListener('resize', resize);
-addEventListener('pointermove', e => { if (e.pointerType == 'mouse') { px = e.clientX / W * 2 - 1; py = e.clientY / H * 2 - 1; } });
-addEventListener('deviceorientation', e => { if (e.gamma != null) { px = clamp(e.gamma / 30, -1, 1); py = clamp((e.beta - 45) / 30, -1, 1); } });
-// iOS only hands out tilt data after a permission call made from a touch
-addEventListener('touchend', function ask() { removeEventListener('touchend', ask); Promise.resolve(window.DeviceOrientationEvent?.requestPermission?.()).catch(() => {}); }, { passive: true });
+addEventListener('pointermove', e => { if (e.pointerType == 'mouse') { px = e.clientX / W * 2 - 1; py = e.clientY / H * 2 - 1; } }); // mouse only: phones get scroll and touch, and are never asked for motion access
 
 const LINES = [gl ? 'Take a bite, then scroll.' : 'Scroll on.', 'You gave me a peach.', 'It was a good peach.', 'Ripe, sweet, gone in a minute.', 'I wanted you to know.', 'Thank you.'];
 console.assert(LINES.length == N, 'one line per scene');
