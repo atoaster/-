@@ -517,8 +517,9 @@ void main(){
 // If it will not build, a LITE build is tried (see the shader) before giving up on the peach.
 let gl = null, ready = false, lite = false, pr, kpc, loc;
 let timed = 0, best = Infinity, cost = 0; // frames timed so far, the fastest of them, and from that the milliseconds one pixel of peach takes this GPU
-// The fine detail that zooming in brings out goes into a program of its own (glass), built once the first has been drawn and timed. So the normal view's
-// is no bigger, and no slower to build, than it was; and a GPU that will not build the second still has the first to zoom with.
+// The fine detail that zooming in brings out goes into a program of its own (glass). So the normal view's is no bigger, and no slower to build, than
+// it was; and a GPU that will not build the second still has the first to zoom with. Where the browser can build a program on the side, the glass is
+// begun as soon as the first has been drawn and timed; where it cannot, building holds the page up, so that waits until the peach is first zoomed in on.
 // glassy: 0 not begun, 1 being built, 2 built, -1 it would not build. locs: where each program keeps its uniforms (the first's, then the glass's).
 let glass, glassy = 0; const locs = [];
 function make(def) {
@@ -711,11 +712,10 @@ function frame(ms) {
     const calm = big && !feast && ms - stirred > 200, turn = big != stage.classList.contains('zoomed');
     if (turn) { stage.classList.toggle('zoomed', big); out.hidden = !big; } // into its seat, or out of it to fill the screen
     if (big || turn) { fine = calm; fit(); const x = (zoom < 10 ? zoom.toFixed(1) : Math.round(zoom)) + '×'; if (mag.textContent != x) mag.textContent = x; }
-    if (!glassy && !lite && timed >= 3) { glass = make('#define FINE\n'); glassy = 1; } // the fine detail: begun here, and asked after every frame until it is built
+    if (!glassy && !lite && (big || kpc && timed >= 3)) { glass = make('#define FINE\n'); glassy = 1; } // the fine detail: begun here, and asked after every frame until it is built
     else if (glassy == 1 && (!kpc || gl.getProgramParameter(glass, kpc.COMPLETION_STATUS_KHR))) {
-      if (gl.getProgramParameter(glass, gl.LINK_STATUS)) { // built: one pixel is drawn with it now (the frame below draws over it), for a driver that leaves part of the work to the first use
-        locs[1] = where(glass); glassy = 2; sharp = false; gl.useProgram(glass); gl.viewport(0, 0, 1, 1); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); gl.useProgram(pr); loc = locs[0];
-      } else { console.warn(gl.getProgramInfoLog(glass)); glassy = -1; zto = Math.min(zto, zmax()); }
+      if (gl.getProgramParameter(glass, gl.LINK_STATUS)) { locs[1] = where(glass); glassy = 2; sharp = false; } // (a picture at rest is drawn again, with it)
+      else { console.warn(gl.getProgramInfoLog(glass)); glassy = -1; zto = Math.min(zto, zmax()); }
     }
     if (!(calm && sharp)) {
       const lens = +(big && glassy == 2), [sx, sy, kx, ky] = [Math.sin(A[0]), Math.sin(A[1]), Math.cos(A[0]), Math.cos(A[1])];
