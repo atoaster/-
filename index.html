@@ -14,16 +14,31 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍑</text></svg>">
 <style>
   body { margin: 0; background: #ffb088; }
-  /* Nothing here scrolls. The page is one screen, and what the visitor moves is the peach: a finger or the mouse, put down anywhere, turns it, and the story
-     turns with it (see the script). So the browser is left only the two-finger pinch, and a phone browser, given nothing to scroll, keeps its bars where they are. */
-  html { touch-action: pinch-zoom; overscroll-behavior: none; }
-  /* Fixed to the top. Landscape and hero are as tall as the screen is with a phone browser's bars tucked away. The hero keeps clear of the strip those bars
-     cover (the difference between the tallest and the shortest the screen gets) and of the caption's line at the foot of what is left, and is centred in the rest. */
-  #land, .hero, #lines { position: fixed; top: 0; left: 0; width: 100%; }
-  #land, .hero { height: 100vh; height: 100lvh; }
-  .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vmin; padding: 0 1rem; padding-bottom: calc(100lvh - 100svh + 7vh + 2.2rem); box-sizing: border-box; pointer-events: none; }
-  #peach { width: min(48vmin, 420px); width: min(48vmin, 420px, max(5rem, 100svh - 10.5rem)); aspect-ratio: 1; pointer-events: auto; cursor: grab; transition: opacity .5s; } /* on a screen too short for it (a phone on its side), it gives way to the heading and the trivia */
-  .held, .held #peach { cursor: grabbing; }
+  /* one caption per scene, scrolling past the fixed hero; positioned so it paints above the landscape and the hero's text, click-through except the button.
+     Each is as tall as the screen is with a phone browser's bars showing, the least it ever is. A section taller than what shows has no one place to rest:
+     the browser may snap it anywhere within the difference, and shifts it again when the bars come or go. */
+  .s { position: relative; height: 100vh; height: 100svh; scroll-snap-align: start; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 1rem;
+       padding: 0 1rem max(7vh, env(safe-area-inset-bottom)); box-sizing: border-box; pointer-events: none; }
+  /* With the bars away the screen is taller than a section, so the page runs on below the last one by the difference: that one can still be brought to the top. */
+  body::after { content: ''; display: block; height: calc(100lvh - 100svh); }
+  .s p { margin: 0; text-align: center; color: #fff; font: 600 clamp(1.1rem, 3.2vw, 1.6rem)/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
+  .s button { pointer-events: auto; cursor: pointer; border: 0; border-radius: 999px; padding: .9em 1.6em; background: #fff; color: #5a2d5a; font: 600 1rem system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+  @supports (animation-timeline: view()) and (animation-range: entry 0% entry 100%) { /* rises in as it scrolls into view; browsers that cannot tie that to scrolling just show it */
+    .s p, .s button { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% entry 100%; }
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(1.5rem); } }
+  @media (max-height: 480px) { .s p, .s button { display: none; } } /* shortcut: captions would sit on top of the hero on short landscape phones, so they are hidden there; lay them out beside the peach if that matters */
+  @media (pointer: coarse) { html { scroll-snap-type: y proximity; } }
+  /* Fixed to the top, and as tall as the screen is with a phone browser's bars tucked away. Nothing here stretches or re-centres as the bars come and go
+     mid-scroll; while they show, they simply cover the bottom of it. So the hero keeps clear of that strip (the difference between the tallest and the
+     shortest the screen gets) and is centred in what always shows. */
+  #land, .hero { position: fixed; top: 0; left: 0; width: 100%; height: 100vh; height: 100lvh; }
+  .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vmin; padding: 0 1rem; padding-bottom: calc(100lvh - 100svh); box-sizing: border-box; pointer-events: none; }
+  /* The peach has a layer to itself, above the captions, so nothing that scrolls past can be drawn over it. #spot keeps its place among the text in the layer below,
+     and #under is kept as tall as that text (see level() in the script), so the two layers centre alike and the peach sits exactly on its spot. */
+  .over { z-index: 1; }
+  #spot { width: min(48vmin, 420px); height: min(48vmin, 420px); }
+  #peach { width: min(48vmin, 420px); aspect-ratio: 1; pointer-events: auto; touch-action: pan-y; cursor: pointer; transition: opacity .5s; }
   @media (prefers-reduced-motion: reduce) { #peach { transition: none; } }
   h1 { margin: 0; text-align: center; color: #fff; letter-spacing: -.02em;
        font: 700 clamp(2rem, 7vw, 5.5rem)/1.1 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -33,26 +48,17 @@
             font: 500 clamp(.9rem, 2.2vw, 1.15rem)/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
             background: rgba(40, 22, 48, .65); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   #trivia:empty { display: none; }
-  /* One caption per scene, all in the one place: the foot of the screen, as it is with a phone browser's bars showing. The scene in view decides which
-     of them shows (say() in the script). Click-through, but for the button while it shows. */
-  #lines { height: 100vh; height: 100svh; display: grid; align-content: end; align-items: end; justify-items: center; padding: 0 1rem max(7vh, env(safe-area-inset-bottom)); box-sizing: border-box; pointer-events: none; }
-  .line { grid-area: 1 / 1; display: flex; flex-direction: column; align-items: center; gap: 1rem; opacity: 0; }
-  .line p { margin: 0; text-align: center; color: #fff; font: 600 clamp(1.1rem, 3.2vw, 1.6rem)/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
-  .line button { cursor: pointer; border: 0; border-radius: 999px; padding: .9em 1.6em; background: #fff; color: #5a2d5a; font: 600 1rem system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
-  .line.on button { pointer-events: auto; }
-  @media (min-width: 640px) { .line { flex-direction: row; gap: 1.5rem; } } /* where there is the width, the last caption and its button share a line, and stand no taller than the others */
-  @media (max-height: 480px) { #lines { display: none; } .hero { padding-bottom: calc(100lvh - 100svh); } } /* shortcut: on short landscape phones the hero needs all the height, so the captions are hidden there; lay them out beside the peach if that matters */
 </style>
 </head>
 <body>
 <canvas id="land" aria-hidden="true"></canvas>
-<div class="hero"><canvas id="peach" aria-hidden="true"></canvas><h1>Thanks for the 🍑</h1><p id="trivia"></p></div>
-<div id="lines"></div>
+<div class="hero"><div id="spot"></div><h1>Thanks for the 🍑</h1><p id="trivia"></p></div>
+<div class="hero over"><canvas id="peach" aria-hidden="true"></canvas><div id="under"></div></div>
 <script>
 'use strict';
 const N = 6, TAU = Math.PI * 2;
-const coarse = matchMedia('(pointer: coarse)').matches;          // phone/tablet mode: lower DPR
-const still = matchMedia('(prefers-reduced-motion: reduce)').matches; // only the visitor's own hand moves things
+const coarse = matchMedia('(pointer: coarse)').matches;          // phone/tablet mode: snap, lower DPR
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches; // only scroll moves things
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = t => t * t * (3 - 2 * t);
 const lerp = (a, b, t) => typeof a == 'number' ? a + (b - a) * t
@@ -129,7 +135,7 @@ const fbm = (x, s) => { let v = 0, a = .5; for (let o = 0; o < 4; o++, x *= 2.1,
 const height = (si, k, x, off) => { const [, , , amp, freq, base] = SCENES[si].layers[k]; return H * (base - amp * fbm((x + off) / SX * freq * 3, si * 97 + k * 13)); };
 
 const land = document.getElementById('land'), g = land.getContext('2d');
-const peach = document.getElementById('peach');
+const peach = document.getElementById('peach'), spot = document.getElementById('spot'), under = document.getElementById('under'), h1 = document.querySelector('h1');
 const STARS = Array.from({ length: 160 }, () => [Math.random(), Math.random(), .4 + Math.random() * 1.2, Math.random() * TAU]);
 let W, H, SX, p = 0, pc = 0, px = 0, py = 0, pxc = 0, pyc = 0;
 
@@ -401,8 +407,8 @@ function build() {
   gl.bindAttribLocation(pr, 0, 'v'); gl.linkProgram(pr);
 }
 function noPeach() { // landscape + text still work
-  gl = null; peach.hidden = true; trivia.textContent = triviaText;
-  const c = document.querySelector('.line p'); if (c) c.textContent = 'Swipe on.';
+  gl = null; peach.hidden = spot.hidden = true; trivia.textContent = triviaText;
+  const c = document.querySelector('.s p'); if (c) c.textContent = 'Scroll on.';
 }
 function linked() { // asked every frame until the peach can be drawn
   if (kpc && !gl.getProgramParameter(pr, kpc.COMPLETION_STATUS_KHR)) return false;
@@ -420,7 +426,7 @@ try {
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   build(); peach.style.opacity = 0; // fades in once built
-} catch (e) { console.error(e); gl = null; peach.hidden = true; } // no WebGL
+} catch (e) { console.error(e); gl = null; peach.hidden = spot.hidden = true; } // no WebGL
 
 // Every peach is its own: a seed picks its blush, speckle, bruises and scar, and is remembered like the bites are.
 const S = new Float32Array(3), Z = new Float32Array(12);
@@ -476,7 +482,7 @@ function feastOn(at, cam) { // at: where the tap landed. cam: where the camera s
 saveBites();
 const rot2 = (x, y, a) => [Math.cos(a) * x + Math.sin(a) * y, Math.cos(a) * y - Math.sin(a) * x]; // same rot() as the shader
 peach.addEventListener('click', e => {
-  if (!ready || feast || dragged) return; // a hold that turned the peach was not a tap
+  if (!ready || feast) return;
   if (bites.length >= MAXB) { bites = []; grow(1 + Math.floor(Math.random() * 1e6)); saveBites(); return; } // tapping the pit grows a fresh peach
   // the tap as a ray in peach space, through the shader's camera; a sphere of radius 1.05 stands in for the peach
   const r = peach.getBoundingClientRect(), ux = (e.clientX - r.left) / r.width * 2 - 1, uy = 1 - (e.clientY - r.top) / r.height * 2, len = Math.hypot(ux, uy, 2.6);
@@ -519,38 +525,12 @@ function drop() {
 }
 const pixel = new Uint8Array(4);
 function paint() { gl.viewport(0, 0, peach.width, peach.height); gl.uniform2f(loc.R, peach.width, peach.height); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
-// The peach is turned by hand, and the story turns with it: half a turn to a scene. yaw and tilt are where the hand has left it; vel is what a flick gave
-// it, owed what the wheel or the keys have asked for and it has still to turn; idle is the slow turn of its own, which waits (ramp) while it is being
-// handled. goal is the scene the story is settling on. held: the pointer that has hold of it, plus one. dragged: that hold has moved it, so was no tap.
-// from: the scene a hold began on; lo and hi: how far the story may go while that hold and its fling last, which is one scene either way, however hard
-// the peach is flung. The wheel and the keys are held to no such limit.
-let yaw = 0, tilt = 0, idle = 0, ramp = +!still, vel = 0, owed = 0, goal = null, held = 0, dragged = false, moved = 0, lastX = 0, lastY = 0, lastT = 0, touched = -1e9, then = 0;
-let from = null, lo = 0, hi = N - 1;
-const turn = d => { yaw += d; p = clamp(p + d / Math.PI, lo, hi); }; // the peach turns freely; the story only so far
-const lines = []; // the captions, one to a scene, once they exist
-function say() { // the caption of the scene in view shows; either side of that it slides off the way the peach is turning, and fades
-  for (let k = 0; k < lines.length; k++) {
-    const d = pc - k, el = lines[k], o = smooth(clamp(1 - Math.abs(d) * 2.5, 0, 1)).toFixed(3);
-    if (el.o != o) { el.style.opacity = el.o = o; el.classList.toggle('on', o > .5); } // on: its button can be pressed
-    if (+o && !still) el.style.transform = `translateX(${(-d * 5).toFixed(2)}rem)`;
-  }
-}
 function frame(ms) {
-  const t = ms / 1000, gap = (ms - then) / 1000, dt = gap > 0 && gap < .25 ? gap : .016, e = still ? 1 : 1 - Math.exp(-dt * 5); then = ms; // real time, however slowly the frames come; a gap longer than that is the page having been away
-  if (!held) {
-    if (owed) { const d = still ? owed : owed * (1 - Math.exp(-dt * 12)); turn(d); owed = Math.abs(owed - d) < .001 ? 0 : owed - d; }
-    if (vel) { const k = Math.exp(-dt * 2.5); turn(vel * (1 - k) / 2.5); vel *= k; if (Math.abs(vel) < .2) vel = 0; } // flung: it slows of itself
-    if (!vel && !owed) {
-      if (goal == null && p % 1 && ms - touched > 160) goal = from != null && Math.abs(p - from) >= .25 ? from + Math.sign(p - from) : Math.round(p); // left between two scenes: on, if the hand turned it an eighth of a turn or more that way, else back; after the wheel, to the nearer. The peach itself stays as it was left
-      if (goal != null) { const d = goal - p; if (still || Math.abs(d) < .002) { p = goal; goal = null; } else p += d * (1 - Math.exp(-dt * 6)); }
-    }
-    const rest = !still && !vel && !owed && ms - touched > 3000; // left alone a while: it turns slowly by itself again, and rights itself
-    ramp += (rest - ramp) * (1 - Math.exp(-dt * 2)); idle += dt * .25 * ramp; if (rest) tilt *= Math.exp(-dt * 1.5);
-  }
+  const t = ms / 1000, e = still ? 1 : .08;
   pc += (p - pc) * e; pxc += (px - pxc) * e; pyc += (py - pyc) * e;
-  draw(t); say();
+  draw(t);
   if (gl && (ready || linked())) {
-    A = [yaw + idle, tilt]; // where the hand left it, and its own slow turn. (It used to lean after the mouse as well: no longer, now that the mouse can take hold of it)
+    A = [pc * Math.PI + pxc * .4 + (still ? 0 : t * .25), -pyc * .25]; // half a turn per scene
     if (feast) { // which of its bites are due by now?
       const k = Math.max(1, Math.floor((ms - feast) / BEAT) + 1);
       if (k > FEAST) { feast = 0; caption(); timed = 0; best = Infinity; } // over: only the pit is left, and that is cheap to draw, so time it again
@@ -572,6 +552,24 @@ function frame(ms) {
   }
   requestAnimationFrame(frame);
 }
+let captions = []; // the lines that scroll past, once they exist
+const sections = document.getElementsByClassName('s'); // and what they sit in, likewise
+// Scrolling picks the scene, and fades each caption as it climbs from where it rests, so that it has gone before it reaches the peach.
+function onScroll() {
+  // One scene to a section, whatever height is showing: a phone's bars change innerHeight as they come and go, and nothing here may follow them.
+  // Clamped to the last section's resting place, so nothing turns or fades on the bounce at either end, or in the extra scroll the bars allow.
+  const sec = Math.max(1, sections[0] ? sections[0].getBoundingClientRect().height : 0), y = clamp(scrollY, 0, sec * (N - 1)); // to the fraction of a pixel; never 0, even in a frame with no height yet
+  p = y / sec;
+  const end = peach.offsetTop + peach.offsetHeight + H * .05; // a caption whose top is this high has vanished: that is a little under the peach's canvas
+  for (const c of captions) {
+    const s = c.offsetParent; if (!s) continue; // not shown at all (short landscape phones)
+    const t = clamp((s.offsetTop + c.offsetTop - y - end) / Math.max(1, c.offsetTop - end), 0, 1), o = (t * t).toFixed(3); // 1 where it rests, 0 at end, falling away quickly
+    if (c.o != o) c.style.opacity = c.o = o;
+  }
+}
+// The peach's layer has no text in it, so the block under the peach is kept as tall as the text under its spot: then both layers centre alike.
+const level = () => under.style.height = (trivia.offsetHeight ? trivia : h1).getBoundingClientRect().bottom - h1.getBoundingClientRect().top + 'px'; // from the top of the heading to the bottom of whatever comes last
+if (window.ResizeObserver) for (const e of [h1, trivia]) new ResizeObserver(level).observe(e);
 let dpr = 1;
 function fit() { // sizes the peach canvas, and says whether that changed it
   // a peach that would take this GPU more than 8 ms a frame is rendered with fewer pixels, enough to take 6, and stretched back to size by CSS
@@ -586,58 +584,21 @@ function resize() {
   const w = Math.round(W * dpr), h = Math.round(H * dpr);
   if (land.width != w || land.height != h) { land.width = w; land.height = h; } // only when it changes: setting either one wipes the canvas
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  fit();
+  level(); fit(); onScroll();
 }
+addEventListener('scroll', onScroll, { passive: true });
 addEventListener('resize', resize);
+addEventListener('pointermove', e => { if (e.pointerType == 'mouse') { px = e.clientX / W * 2 - 1; py = e.clientY / H * 2 - 1; } }); // mouse only: phones get scroll and touch, and are never asked for motion access
 
-// A finger or the mouse, put down anywhere but on the button, takes hold of the peach. Left and right turn it, so that the spot under the finger stays
-// under the finger; up and down tip it. Less than a few pixels of that is a tap, and a tap on the peach is a bite (see the click above).
-addEventListener('pointerdown', e => {
-  if (held || e.button || e.target.closest('button')) return; // one hold at a time, with the main button
-  held = e.pointerId + 1; dragged = false; moved = 0; lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp; vel = owed = ramp = 0; goal = null; touched = performance.now();
-  from = Math.round(p); lo = Math.max(0, from - 1); hi = Math.min(N - 1, from + 1);
-  try { e.target.setPointerCapture(e.pointerId); } catch (x) {} // the hold outlasts the finger leaving what it first touched
-});
-addEventListener('pointermove', e => {
-  if (e.pointerId + 1 != held) { if (!held && e.pointerType == 'mouse') { px = e.clientX / W * 2 - 1; py = e.clientY / H * 2 - 1; } return; } // the mouse merely passing: peach and landscape lean a little after it
-  const dx = e.clientX - lastX, dy = e.clientY - lastY, dt = Math.max(1, e.timeStamp - lastT) / 1000; lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp;
-  if (!dragged && (moved += Math.hypot(dx, dy)) < 6) return; // no more than a tap so far
-  if (!dragged) { dragged = true; document.documentElement.classList.add('held'); }
-  const k = 2 / (peach.clientWidth || Math.min(420, Math.min(W, H) * .48)), d = -dx * k; // radians to a pixel: what keeps the front of the peach under the finger
-  turn(d); tilt = clamp(tilt + dy * k, -1.2, 1.2); vel += (d / dt - vel) * (1 - Math.exp(-dt * 20)); touched = performance.now();
-});
-const release = e => {
-  if (e.pointerId + 1 != held) return;
-  held = 0; touched = performance.now(); document.documentElement.classList.remove('held');
-  vel = !dragged || still || e.type == 'pointercancel' || e.timeStamp - lastT > 80 ? 0 : clamp(vel, -14, 14); // let go while still moving, it keeps turning
-};
-addEventListener('pointerup', release); addEventListener('pointercancel', release); addEventListener('lostpointercapture', release); // however the hold ends
-addEventListener('touchmove', e => { if (e.touches.length == 1 && !e.target.closest('button')) e.preventDefault(); }, { passive: false }); // for browsers that would drag the page about regardless
-// The wheel and the keys turn it too, for those with no finger on it: a screen's worth of wheel, or one press, to a scene.
-addEventListener('wheel', e => {
-  if (e.ctrlKey) return; // a pinch on a trackpad, which is the browser's
-  const d = (Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX) * (e.deltaMode == 1 ? 16 : e.deltaMode == 2 ? H : 1);
-  owed += d / Math.max(1, H) * Math.PI; vel = ramp = 0; goal = from = null; lo = 0; hi = N - 1; touched = performance.now();
-}, { passive: true });
-addEventListener('keydown', e => {
-  if (e.altKey || e.ctrlKey || e.metaKey) return;
-  const k = e.key, at = Math.round(goal != null ? goal : p + owed / Math.PI), space = k == ' ' && !(e.target.closest && e.target.closest('button')); // on the button, space presses it
-  const to = k == 'ArrowRight' || k == 'ArrowDown' || k == 'PageDown' || space && !e.shiftKey ? at + 1 : k == 'ArrowLeft' || k == 'ArrowUp' || k == 'PageUp' || space && e.shiftKey ? at - 1 : k == 'Home' ? 0 : k == 'End' ? N - 1 : null;
-  if (to == null) return;
-  const g = clamp(to, 0, N - 1); vel = ramp = 0; from = null; lo = 0; hi = N - 1; touched = performance.now();
-  if (Math.abs(g - p) > 1.5) { owed = 0; goal = g; } else { goal = null; owed = (g - p) * Math.PI; } // one scene on or back turns the peach with it; further than that, the story alone
-});
-
-const LINES = [gl ? 'Take a bite, then spin.' : 'Swipe on.', 'You gave me a peach.', 'It was a good peach.', 'Ripe, sweet, gone in a minute.', 'I wanted you to know.', 'Thank you.'];
+const LINES = [gl ? 'Take a bite, then scroll.' : 'Scroll on.', 'You gave me a peach.', 'It was a good peach.', 'Ripe, sweet, gone in a minute.', 'I wanted you to know.', 'Thank you.'];
 console.assert(LINES.length == N, 'one line per scene');
-for (let i = 0; i < N; i++) { const s = document.getElementById('lines').appendChild(document.createElement('div')); s.className = 'line'; s.innerHTML = `<p>${LINES[i]}</p>` + (i == N - 1 ? '<button id="share" type="button">Pass it on</button>' : ''); lines.push(s); }
-const share = document.getElementById('share');
-share.onclick = async function () {
+for (let i = 0; i < N; i++) { const s = document.body.appendChild(document.createElement('div')); s.className = 's'; s.innerHTML = `<p>${LINES[i]}</p>` + (i == N - 1 ? '<button id="share" type="button">Pass it on</button>' : ''); }
+captions = document.querySelectorAll('.s p, .s button');
+document.getElementById('share').onclick = async function () {
   const url = location.origin + location.pathname;
   if (navigator.share) return navigator.share({ title: document.title, url }).catch(() => {}); // closing the share sheet is not an error
   try { await navigator.clipboard.writeText(url); this.textContent = 'Link copied'; } catch (e) { prompt('Copy this link', url); } // no clipboard on plain http
 };
-share.onfocus = () => { vel = owed = 0; from = null; lo = 0; hi = N - 1; goal = N - 1; }; // reached with the keyboard: on to the scene it belongs to
 resize(); requestAnimationFrame(frame);
 </script>
 </body>
