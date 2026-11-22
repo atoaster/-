@@ -538,7 +538,18 @@ function frame(ms) {
   }
   requestAnimationFrame(frame);
 }
-const onScroll = () => p = scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight) * (N - 1);
+let captions = []; // the lines that scroll past, once they exist
+// Scrolling picks the scene, and fades each caption as it climbs from where it rests, so that it has gone before it reaches the peach.
+function onScroll() {
+  const max = Math.max(1, document.documentElement.scrollHeight - innerHeight), y = clamp(scrollY, 0, max); // clamped: nothing fades on the bounce at either end
+  p = scrollY / max * (N - 1);
+  const end = peach.offsetTop + peach.offsetHeight + innerHeight * .05; // a caption whose top is this high has vanished: that is a little under the peach's canvas
+  for (const c of captions) {
+    const s = c.offsetParent; if (!s) continue; // not shown at all (short landscape phones)
+    const t = clamp((s.offsetTop + c.offsetTop - y - end) / Math.max(1, c.offsetTop - end), 0, 1), o = (t * t).toFixed(3); // 1 where it rests, 0 at end, falling away quickly
+    if (c.o != o) c.style.opacity = c.o = o;
+  }
+}
 let dpr = 1;
 function fit() { // sizes the peach canvas, and says whether that changed it
   // a peach that would take this GPU more than 8 ms a frame is rendered with fewer pixels, enough to take 6, and stretched back to size by CSS
@@ -560,6 +571,7 @@ addEventListener('pointermove', e => { if (e.pointerType == 'mouse') { px = e.cl
 const LINES = [gl ? 'Take a bite, then scroll.' : 'Scroll on.', 'You gave me a peach.', 'It was a good peach.', 'Ripe, sweet, gone in a minute.', 'I wanted you to know.', 'Thank you.'];
 console.assert(LINES.length == N, 'one line per scene');
 for (let i = 0; i < N; i++) { const s = document.body.appendChild(document.createElement('div')); s.className = 's'; s.innerHTML = `<p>${LINES[i]}</p>` + (i == N - 1 ? '<button id="share" type="button">Pass it on</button>' : ''); }
+captions = document.querySelectorAll('.s p, .s button');
 document.getElementById('share').onclick = async function () {
   const url = location.origin + location.pathname;
   if (navigator.share) return navigator.share({ title: document.title, url }).catch(() => {}); // closing the share sheet is not an error
