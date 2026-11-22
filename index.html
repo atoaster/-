@@ -38,7 +38,9 @@
      and #under is kept as tall as that text (see level() in the script), so the two layers centre alike and the peach sits exactly on its spot. */
   .over { z-index: 1; }
   #spot { width: min(48vmin, 420px); height: min(48vmin, 420px); }
-  #peach { width: min(48vmin, 420px); aspect-ratio: 1; pointer-events: auto; touch-action: pan-y; cursor: pointer; transition: opacity .5s; }
+  /* A finger on the peach turns it, so there the browser must not scroll along: it is left only the two-finger pinch. Anywhere else the page scrolls as ever. */
+  #peach { width: min(48vmin, 420px); aspect-ratio: 1; pointer-events: auto; touch-action: pinch-zoom; cursor: grab; transition: opacity .5s; }
+  #peach.held { cursor: grabbing; }
   @media (prefers-reduced-motion: reduce) { #peach { transition: none; } }
   h1 { margin: 0; text-align: center; color: #fff; letter-spacing: -.02em;
        font: 700 clamp(2rem, 7vw, 5.5rem)/1.1 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -482,7 +484,7 @@ function feastOn(at, cam) { // at: where the tap landed. cam: where the camera s
 saveBites();
 const rot2 = (x, y, a) => [Math.cos(a) * x + Math.sin(a) * y, Math.cos(a) * y - Math.sin(a) * x]; // same rot() as the shader
 peach.addEventListener('click', e => {
-  if (!ready || feast) return;
+  if (!ready || feast || dragged) return; // a hold that turned the peach was not a tap
   if (bites.length >= MAXB) { bites = []; grow(1 + Math.floor(Math.random() * 1e6)); saveBites(); return; } // tapping the pit grows a fresh peach
   // the tap as a ray in peach space, through the shader's camera; a sphere of radius 1.05 stands in for the peach
   const r = peach.getBoundingClientRect(), ux = (e.clientX - r.left) / r.width * 2 - 1, uy = 1 - (e.clientY - r.top) / r.height * 2, len = Math.hypot(ux, uy, 2.6);
@@ -525,12 +527,21 @@ function drop() {
 }
 const pixel = new Uint8Array(4);
 function paint() { gl.viewport(0, 0, peach.width, peach.height); gl.uniform2f(loc.R, peach.width, peach.height); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+// The peach can be taken hold of and turned, like a model in the hand. yaw and tilt are how far the visitor has turned and tipped it, on top of the half
+// turn a scene that scrolling gives it; vel is what a flick left it with; idle is its own slow turn, which waits (ramp) while it is handled and for a few
+// seconds after. held: the pointer that has hold of it, plus one. dragged: that hold has moved it, so was no tap.
+let yaw = 0, tilt = 0, idle = 0, ramp = +!still, vel = 0, held = 0, dragged = false, moved = 0, lastX = 0, lastY = 0, lastT = 0, touched = -1e9, then = 0;
 function frame(ms) {
-  const t = ms / 1000, e = still ? 1 : .08;
+  const t = ms / 1000, e = still ? 1 : .08, gap = (ms - then) / 1000, dt = gap > 0 && gap < .25 ? gap : .016; then = ms; // dt: real time, however slowly the frames come; a longer gap is the page having been away
+  if (!held) {
+    if (vel) { const k = Math.exp(-dt * 2.5); yaw += vel * (1 - k) / 2.5; vel *= k; if (Math.abs(vel) < .2) vel = 0; } // flung: it turns on, and slows
+    const rest = !still && !vel && ms - touched > 3000; // left alone a while: it turns slowly by itself again, and rights itself
+    ramp += (rest - ramp) * (1 - Math.exp(-dt * 2)); idle += dt * .25 * ramp; if (rest) tilt *= Math.exp(-dt * 1.5);
+  }
   pc += (p - pc) * e; pxc += (px - pxc) * e; pyc += (py - pyc) * e;
   draw(t);
   if (gl && (ready || linked())) {
-    A = [pc * Math.PI + pxc * .4 + (still ? 0 : t * .25), -pyc * .25]; // half a turn per scene
+    A = [pc * Math.PI + yaw + idle, tilt]; // half a turn per scene, as ever; the visitor's own turning and tipping; its slow turn of its own. (It no longer leans after the mouse, which can take hold of it now: the two fought. The landscape still does)
     if (feast) { // which of its bites are due by now?
       const k = Math.max(1, Math.floor((ms - feast) / BEAT) + 1);
       if (k > FEAST) { feast = 0; caption(); timed = 0; best = Infinity; } // over: only the pit is left, and that is cheap to draw, so time it again
@@ -589,6 +600,30 @@ function resize() {
 addEventListener('scroll', onScroll, { passive: true });
 addEventListener('resize', resize);
 addEventListener('pointermove', e => { if (e.pointerType == 'mouse') { px = e.clientX / W * 2 - 1; py = e.clientY / H * 2 - 1; } }); // mouse only: phones get scroll and touch, and are never asked for motion access
+// Taking hold of the peach: a finger or the mouse put down on it turns it left and right, so that the spot under the finger stays under the finger, and
+// tips it up and down. Less than a few pixels of that is a tap, and a tap is a bite (the click above). The page does not scroll under a finger that
+// is on the peach; everywhere else it scrolls as it always has.
+peach.addEventListener('pointerdown', e => {
+  if (e.button || held && !e.isPrimary) return; // the main button, and one hold at a time
+  held = e.pointerId + 1; dragged = false; moved = 0; lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp; vel = ramp = 0; touched = performance.now();
+  try { peach.setPointerCapture(e.pointerId); } catch (x) {} // the hold outlasts the finger sliding off the peach
+});
+peach.addEventListener('pointermove', e => {
+  if (e.pointerId + 1 != held) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY, dt = Math.max(1, e.timeStamp - lastT) / 1000; lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp;
+  if (!dragged && (moved += Math.hypot(dx, dy)) < 6) return; // no more than a tap so far
+  dragged = true; peach.classList.add('held');
+  const k = 2 / (peach.clientWidth || 1), d = -dx * k; // radians to a pixel: what keeps the front of the peach under the finger
+  yaw += d; tilt = clamp(tilt + dy * k, -1.2, 1.2); vel += (d / dt - vel) * (1 - Math.exp(-dt * 20)); touched = performance.now();
+});
+const release = e => {
+  if (e.pointerId + 1 != held) return;
+  held = 0; touched = performance.now(); peach.classList.remove('held');
+  vel = !dragged || still || e.type == 'pointercancel' || e.timeStamp - lastT > 80 ? 0 : clamp(vel, -14, 14); // let go while it is moving, and it keeps turning
+};
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) peach.addEventListener(type, release); // however the hold ends
+peach.addEventListener('touchmove', e => { if (e.cancelable && e.touches.length == 1) e.preventDefault(); }, { passive: false }); // for browsers that would scroll the page along regardless
+addEventListener('blur', () => { held = 0; peach.classList.remove('held'); }); // a hold the window lost track of
 
 const LINES = [gl ? 'Take a bite, then scroll.' : 'Scroll on.', 'You gave me a peach.', 'It was a good peach.', 'Ripe, sweet, gone in a minute.', 'I wanted you to know.', 'Thank you.'];
 console.assert(LINES.length == N, 'one line per scene');
