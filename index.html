@@ -558,7 +558,7 @@ const sections = document.getElementsByClassName('s'); // and what they sit in, 
 function onScroll() {
   // One scene to a section, whatever height is showing: a phone's bars change innerHeight as they come and go, and nothing here may follow them.
   // Clamped to the last section's resting place, so nothing turns or fades on the bounce at either end, or in the extra scroll the bars allow.
-  const sec = Math.max(1, sections[0] ? sections[0].offsetHeight : 0), y = clamp(scrollY, 0, sec * (N - 1)); // never 0, even in a frame with no height yet
+  const sec = Math.max(1, sections[0] ? sections[0].getBoundingClientRect().height : 0), y = clamp(scrollY, 0, sec * (N - 1)); // to the fraction of a pixel; never 0, even in a frame with no height yet
   p = y / sec;
   const end = peach.offsetTop + peach.offsetHeight + H * .05; // a caption whose top is this high has vanished: that is a little under the peach's canvas
   for (const c of captions) {
