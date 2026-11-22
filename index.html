@@ -133,10 +133,26 @@ const TRIVIA = [
   'The # symbol is also called an octothorpe.',
   'A nectarine is a peach without the fuzz: same species, one gene apart.',
 ];
-// A different fact every visit: step through the list, keeping the place in localStorage.
-let ti = Math.floor(Math.random() * TRIVIA.length); // first visit, or storage blocked: random pick
-try { const last = localStorage.getItem('trivia'); if (last != null) ti = (+last + 1) % TRIVIA.length || 0; localStorage.setItem('trivia', ti); } catch (e) {}
-const trivia = document.getElementById('trivia'), triviaText = 'Did you know? ' + TRIVIA[ti];
+// A different fact every visit, and with every new peach: dealt like cards from a shuffled pack, so that none comes round again until all the others
+// have been seen. What is left of the pack is kept in localStorage, as the numbers of the facts still to come, the next one last. It is never left
+// empty there: when the last is dealt a new pack is shuffled, and not with that same fact on top. Where nothing can be kept, every visit shuffles afresh.
+const trivia = document.getElementById('trivia');
+let dealt = -1, triviaText = ''; // the fact that is showing, and how it reads
+function deal() {
+  const fresh = () => { // every fact, shuffled, with any but the one showing to come next
+    const p = TRIVIA.map((_, i) => i), n = p.length - 1;
+    for (let i = n; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+    if (p[n] == dealt) [p[0], p[n]] = [p[n], p[0]];
+    return p;
+  };
+  let pack; try { pack = JSON.parse(localStorage.getItem('trivia')); } catch (e) {}
+  pack = Array.isArray(pack) ? pack.filter(i => Number.isInteger(i) && i >= 0 && i < TRIVIA.length) : []; // (anything else there, such as the single number an earlier version kept, counts as no pack)
+  if (!pack.length) pack = fresh();
+  dealt = pack.pop(); if (!pack.length) pack = fresh();
+  try { localStorage.setItem('trivia', JSON.stringify(pack)); } catch (e) {}
+  triviaText = 'Did you know? ' + TRIVIA[dealt];
+}
+deal();
 
 // One scene per screen of scroll. sky: [top, bottom] rgb. sun: [r,g,b, x, y, radius, glow].
 // layers far→near: [r,g,b, amplitude, frequency, baseline] as fractions of the viewport.
@@ -607,7 +623,7 @@ saveBites();
 const rot2 = (x, y, a) => [Math.cos(a) * x + Math.sin(a) * y, Math.cos(a) * y - Math.sin(a) * x]; // same rot() as the shader
 grip.addEventListener('click', e => { // on the grip: the circle over the fruit (see the styles)
   if (!ready || feast || dragged) return; // a hold that turned the peach was not a tap
-  if (bites.length >= MAXB) { bites = []; grow(1 + Math.floor(Math.random() * 1e6)); saveBites(); return; } // tapping the pit grows a fresh peach
+  if (bites.length >= MAXB) { bites = []; grow(1 + Math.floor(Math.random() * 1e6)); deal(); saveBites(); return; } // tapping the pit grows a fresh peach, and a fresh fact comes with it
   // the tap as a ray in peach space, through the shader's camera; a sphere of radius 1.05 stands in for the peach
   const [ux, uy] = uvAt(e.clientX, e.clientY), len = Math.hypot(ux, uy, 2.6);
   const ro = [0, .1, 3.6], rd = [ux / len, uy / len, -2.6 / len];
