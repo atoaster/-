@@ -18,7 +18,7 @@
      Each is as tall as the screen is with a phone browser's bars showing, the least it ever is. A section taller than what shows has no one place to rest:
      the browser may snap it anywhere within the difference, and shifts it again when the bars come or go. */
   .s { position: relative; height: 100vh; height: 100svh; scroll-snap-align: start; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 1rem;
-       padding: 0 1rem max(7vh, env(safe-area-inset-bottom)); box-sizing: border-box; pointer-events: none; }
+       padding: 0 1rem max(7vh, env(safe-area-inset-bottom)); box-sizing: border-box; pointer-events: none; opacity: var(--o, 1); }
   /* With the bars away the screen is taller than a section, so the page runs on below the last one by the difference: that one can still be brought to the top. */
   body::after { content: ''; display: block; height: calc(100lvh - 100svh); }
   .s p { margin: 0; text-align: center; color: #fff; font: 600 clamp(1.1rem, 3.2vw, 1.6rem)/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
@@ -42,18 +42,31 @@
   /* The peach has a layer to itself, above the captions, so nothing that scrolls past can be drawn over it. #spot keeps its place among the text in the layer below,
      and #under is kept as tall as that text (see level() in the script), so the two layers centre alike and the peach sits exactly on its spot. */
   .over { z-index: 1; }
-  #spot { width: min(48vmin, 420px); height: min(48vmin, 420px); }
-  #peach { width: min(48vmin, 420px); aspect-ratio: 1; transition: opacity .5s; }
+  #spot, #seat { width: min(48vmin, 420px); height: min(48vmin, 420px); }
+  #seat { flex: none; } /* where the peach is drawn: as a canvas, it never gave way when there was no room, and its seat does not either */
+  #peach { display: block; width: 100%; height: 100%; transition: opacity .5s; }
   /* What a finger or the mouse takes hold of, to turn the peach or to bite it, is not the canvas, whose corners are empty, but a circle laid over the fruit:
-     the outline of the peach's body, which is the same from every side. There the browser must not scroll along with the finger, and is left only the
-     two-finger pinch. A finger put down anywhere else, right beside the fruit included, scrolls the page as ever. #grip itself is a line of no height
-     under the canvas (its margin takes back the gap it would add, to the last fraction of a pixel); the circle stands on it. */
-  #grip { flex: none; position: relative; --s: min(48vmin, 420px); width: var(--s); height: 0; margin-top: -2vmin; touch-action: pinch-zoom;
+     the outline of the peach's body, which is the same from every side. There the browser must neither scroll along with one finger nor zoom the page
+     under two: both are the peach's own, to turn it and to zoom in on it. A finger put down anywhere else, right beside the fruit included, scrolls the
+     page as ever. #grip itself is a line of no height under the peach's seat (its margin takes back the gap it would add, to the last fraction of a
+     pixel); the circle stands on it. */
+  #grip { flex: none; position: relative; --s: min(48vmin, 420px); width: var(--s); height: 0; margin-top: -2vmin; touch-action: none;
           user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
   #grip::before { content: ''; position: absolute; left: calc(var(--s) * .104); bottom: calc(var(--s) * .068); width: calc(var(--s) * .792); height: calc(var(--s) * .792);
-                  border-radius: 50%; pointer-events: auto; touch-action: pinch-zoom; cursor: grab; } /* touch-action again, for a browser that reads it off the box touched */
+                  border-radius: 50%; pointer-events: auto; touch-action: none; cursor: grab; } /* touch-action again, for a browser that reads it off the box touched */
   #grip.held::before { cursor: grabbing; }
+  /* Zoomed in on (see the script), the peach is no longer drawn in its seat alone but over the whole of its layer, and all of that is where it is taken hold of:
+     nothing of the page is left to scroll by until it is zoomed back out. Its seat keeps its place meanwhile, so nothing else moves. */
+  .zoomed #peach { position: absolute; left: 0; top: 0; }
+  .zoomed #grip { position: static; }
+  .zoomed #grip::before { left: 0; top: 0; bottom: auto; width: 100%; height: 100%; border-radius: 0; }
+  /* The way back, for anyone who would not think to pinch or roll it small again. It stands on the line the captions rest on, clear of a phone browser's bars. */
+  #out { position: absolute; left: 50%; bottom: max(7vh, env(safe-area-inset-bottom)); bottom: calc(100lvh - 100svh + max(7vh, env(safe-area-inset-bottom))); transform: translateX(-50%);
+         pointer-events: auto; cursor: pointer; border: 0; border-radius: 999px; padding: .7em 1.3em; white-space: nowrap; color: #fff;
+         font: 600 .95rem system-ui, -apple-system, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums;
+         background: rgba(40, 22, 48, .65); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   @media (prefers-reduced-motion: reduce) { #peach { transition: none; } }
+  h1, #trivia { opacity: var(--o, 1); } /* --o: the text gives way to a peach being zoomed in on, as the captions do */
   h1 { margin: 0; text-align: center; color: #fff; letter-spacing: -.02em;
        font: 700 clamp(2rem, 7vw, 5.5rem)/1.1 system-ui, -apple-system, "Segoe UI", sans-serif;
        text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
@@ -67,7 +80,7 @@
 <body>
 <canvas id="land" aria-hidden="true"></canvas>
 <div class="hero"><div id="spot"></div><h1>Thanks for the 🍑</h1><p id="trivia"></p></div>
-<div class="hero over"><canvas id="peach" aria-hidden="true"></canvas><div id="grip"></div><div id="under"></div></div>
+<div class="hero over"><div id="seat"><canvas id="peach" aria-hidden="true"></canvas></div><div id="grip"></div><div id="under"></div><button id="out" type="button" hidden><span id="mag"></span> · Zoom out</button></div>
 <script>
 'use strict';
 const N = 6, TAU = Math.PI * 2;
@@ -149,7 +162,8 @@ const fbm = (x, s) => { let v = 0, a = .5; for (let o = 0; o < 4; o++, x *= 2.1,
 const height = (si, k, x, off) => { const [, , , amp, freq, base] = SCENES[si].layers[k]; return H * (base - amp * fbm((x + off) / SX * freq * 3, si * 97 + k * 13)); };
 
 const land = document.getElementById('land'), g = land.getContext('2d');
-const peach = document.getElementById('peach'), grip = document.getElementById('grip'), spot = document.getElementById('spot'), under = document.getElementById('under'), h1 = document.querySelector('h1');
+const peach = document.getElementById('peach'), seat = document.getElementById('seat'), grip = document.getElementById('grip'), spot = document.getElementById('spot'), under = document.getElementById('under'), h1 = document.querySelector('h1');
+const stage = grip.parentNode, out = document.getElementById('out'), mag = document.getElementById('mag');
 const STARS = Array.from({ length: 160 }, () => [Math.random(), Math.random(), .4 + Math.random() * 1.2, Math.random() * TAU]);
 let W, H, SX, p = 0, pc = 0, px = 0, py = 0, pxc = 0, pyc = 0;
 
@@ -184,12 +198,13 @@ precision highp float;
 precision mediump float;
 #define LITE
 #endif
-// R: canvas size. A: camera angles. B[i]: a bite's centre, and a random number of its own. U[i]: the jaw's axis across that bite, and 1/|centre|.
+// V: the view. V.xy: where on the canvas the middle of the picture lies, V.z: how much of the picture one pixel is (the canvas is 2 tall, unless zoomed in on).
+// C: turns the camera's frame into the peach's. B[i]: a bite's centre, and a random number of its own. U[i]: the jaw's axis across that bite, and 1/|centre|.
 // The first MAXB-1 are the visitor's bites, the rest the feast the last one sets off. NB: how many are taken. GONE: 1 once only the pit is left.
 // S: this peach's noise offset. Z[0], Z[1]: bruises, Z[2]: a scar (where on the fruit, how big). ST: 1 while the stem still has something to hold on to, 0 once it has not, 2 to draw stem and leaf with nothing else (for when they fall).
 #define MAXB 7   // bites it takes to finish a peach
 #define FEAST 12 // bites in the feast
-uniform vec2 R,A;uniform vec4 B[MAXB-1+FEAST],U[MAXB-1+FEAST],Z[3];uniform vec3 S;uniform int NB;uniform float ST,GONE;
+uniform vec3 V;uniform mat3 C;uniform vec4 B[MAXB-1+FEAST],U[MAXB-1+FEAST],Z[3];uniform vec3 S;uniform int NB;uniform float ST,GONE;
 #define TH .022 // how thick the skin is
 mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
 #ifdef LITE
@@ -349,16 +364,100 @@ vec3 bump(vec3 p,vec3 n,float id,float px){
   for(int i=0;i<4;i++){vec3 k=tet(i);g+=k*hgt(p+k*e,id,px);}
   g/=4.*e;return normalize(n-g+n*dot(g,n));
 }
+#ifdef FINE
+// Under the glass. Zoomed in on, the peach shows what it is made of, a layer at a time, each coming in as it grows wider than a pixel: the fuzz as single
+// hairs, the skin as cells with walls between them, the grains inside the cells, the fine ridges of the wax over them; and the flesh, the stone, the bark
+// and the leaf each as cells of their own. None of it is shape: only colour, and the slope (sl) it gives the surface for the light to catch.
+// All of it goes into a second program (see the script), so that the one the normal view is drawn with is no bigger for it.
+
+vec3 vn3(vec3 x){ // three noises at the price of one: plainer than vn, which is no matter this fine
+  vec3 i=floor(x),f=fract(x),u=f*f*(3.-2.*f);vec2 o=vec2(0.,1.);
+  return mix(mix(mix(h3(i),h3(i+o.yxx),u.x),mix(h3(i+o.xyx),h3(i+o.yyx),u.x),u.y),mix(mix(h3(i+o.xxy),h3(i+o.yxy),u.x),mix(h3(i+o.xyy),h3(i+o.yyy),u.x),u.y),u.z);
+}
+// Two hairs to a cell of x, lying along the skin (n: the way it faces): anywhere in the cell, tapered to a point at either end, a little bent, and gone
+// before the cell's edge, so that none is cut short. They lie more or less one way (fl), as a nap does. w: half a hair's width, a: a pixel's width, both
+// in cells. dn: how many of the cells have any. Returns how much of the pixel a hair covers. k: where across the hair the pixel lies, -1 to 1.
+// e: the direction across it. sh: the shade the hairs cast on the skin beside them.
+float hair(vec3 x,vec3 n,vec3 fl,float w,float a,float dn,out float k,out vec3 e,out float sh){
+  vec3 i=floor(x),f=fract(x)-.5,r=h3(i),o=h3(i+7.),g=1.-smoothstep(.34,.5,abs(f));
+  float win=step(fract(r.y*7.3),dn)*g.x*g.y*g.z,m=0.;k=0.;sh=0.;e=vec3(0.);
+  for(int j=0;j<2;j++){
+    vec3 d=o*2.-1.+fl;d=normalize(d-n*dot(d,n)+1e-4);vec3 ej=cross(n,d),q=f-(r-.5)*.34;
+    float l=.2+.13*r.x,s=dot(q,d),t=dot(q,ej)+.02*sin(s*7.+r.z*6.3),th=sqrt(max(0.,1.-s*s/(l*l))),ww=w*(.7+.6*r.y)*th,mj=win*clamp((ww-abs(t))/a+.5,0.,1.)*min(1.,2.*ww/a);
+    sh=max(sh,win*th*(1.-smoothstep(ww,3.*ww+a,abs(t))));
+    if(mj>m){m=mj;k=clamp(t/max(ww,1e-5),-1.,1.);e=ej;}
+    r=fract(r.zxy*3.7+.37);o=fract(o.yzx*5.3+.61);
+  }
+  return m;
+}
+// Cells: a sponge of them, cut through by the surface. Returns how far it is to the nearest wall, and a number of the cell's own.
+// u: the way to that wall. m: the way to the cell's middle, and how far.
+vec2 cells(vec3 x,out vec3 u,out vec3 m){
+  vec3 i=floor(x-.5),f=x-i,v1=vec3(0.),v2=vec3(0.);float d1=9.,d2=9.,id=0.;
+  for(int j=0;j<8;j++){ // the eight cells around: with their middles kept away from their edges, the nearest two are among them
+    float fj=float(j);vec3 o=vec3(mod(fj,2.),mod(floor(fj*.5),2.),floor(fj*.25)),h=h3(i+o),v=o+.2+.6*h-f;float d=dot(v,v);
+    if(d<d1){d2=d1;v2=v1;d1=d;v1=v;id=fract(h.x*57.+h.y*13.);}else if(d<d2){d2=d;v2=v;}
+  }
+  m=v1;v2-=v1;float l=max(length(v2),1e-4);u=v2/l;
+  return vec2((d2-d1)/(2.*l),id);
+}
+// id: what it is (as map gives it), cov: how blushed and fz: how fuzzy, if it is skin. px: a pixel's width, allowing for how the surface faces.
+void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,inout vec3 c,inout vec3 sl,inout float spe){
+  // G: its grain, at two sizes (how many to a unit) and how strong each. F: its cells (how many to a unit, each way).
+  // W: half the thickness of their walls, how dark those are, and how far each cell bulges.
+  vec4 G;vec3 F,W;
+  if(id<.5){G=vec4(240.,1100.,.22,.18);F=vec3(1000.);W=vec3(.03,0.,.75);}                 // skin: cells a thousandth of the fruit's radius across
+  else if(id<1.5){G=vec4(360.,5000.,.3,.3);F=vec3(520.,170.,520.);W=vec3(.06,.45,.6);}    // bark: long cells, running up the stem
+  else if(id<2.5){G=vec4(300.,6000.,.2,.25);F=vec3(650.);W=vec3(.04,.3,.5);}              // leaf
+  else if(id<3.5){G=vec4(1800.,9000.,.25,.2);F=vec3(260.);W=vec3(.03,.2,1.4);}            // flesh: cells far bigger than the skin's, swollen with juice
+  else{G=vec4(360.,6000.,.35,.25);F=vec3(700.);W=vec3(.09,.5,.5);}                        // stone: small cells, thick in the wall
+  float m2=0.,fm=max(F.x,F.y),wc=fade(fm,px);
+  for(int i=0;i<2;i++){ // the grain: on the skin it is only colour, pigment gathered in clouds
+    float f=i==0?G.x:G.y,k=i==0?G.z:G.w,w=fade(f,px);
+    if(w>0.){vec3 q=p*f+S,v=vn3(q+.45*sin(q.yzx*1.9))-.5;c*=1.+k*v.x*w;m2=v.y;if(id>.5)sl+=(v-n*dot(v,n))*(k*w);} // (bent out of line, or its grid would show)
+  }
+  if(wc>0.){
+    vec3 u,v,x=M*(p*F)+S;vec2 k=cells(x+.3*sin(x.yzx*1.3),u,v);    // turned and bent a little, so that they do not line up in rows
+    float a=fm*px,wall=clamp((W.x-k.x)/a+.5,0.,1.)*min(1.,2.*W.x/a);
+    c*=(1.+.34*(k.y-.5)*wc)*(1.-W.y*wall*wc);                       // some cells hold more colour than others
+    u=u*M;v=v*M;v-=n*dot(v,n);sl+=v*(W.z*wc);                       // and each one bulges a little
+    if(id<.5){
+      float rim=1.-smoothstep(0.,.4,k.x),wg=fade(5000.,px),ws=fade(8000.,px);
+      c=mix(c,vec3(1.,.86,.55),.38*cov*step(.95,k.y)*wc);           // in the blush, the odd one holds none
+      if(wg>0.)c=mix(c,c*vec3(.8,.6,.5),.5*wg*dots(p*5000.+S,.55)); // the grains inside them
+      if(ws>0.){                                                    // the ridges of the wax over them, which run their own way on every cell
+        vec3 d=normalize(sin(k.y*vec3(40.,73.,91.)+vec3(0.,1.,2.)));d=normalize(d-n*dot(d,n)+1e-4);
+        float ph=dot(p,d)*5.2e4+12.*m2;
+        sl+=d*(.2*cos(ph)*ws*(1.-rim));c*=1.+.05*sin(ph)*ws;
+      }
+      c=mix(c,vec3(1.,.93,.78),(.14*rim+.3*wall)*wc);               // the colour is in the middle of each; their walls show as pale lines
+      sl-=(u-n*dot(u,n))*(.5*wall*wc);                              // and lie in the creases between
+    }else if(id>1.5&&id<2.5)c=mix(c,vec3(.75,.9,.5),.5*wc*dots(p*300.+S,.3)); // the pores a leaf breathes through
+  }
+  if(id<.5){ // the fuzz, a layer at a time: three of fine underfur, then two of longer, stouter hairs over it. R turns each layer's cells, so that no two line up.
+    float dn=.35+.6*fz,f=70.,w=1.3e-4;mat3 R=mat3(1.); // (rubbed thin in places, matted where juice has run)
+    for(int i=0;i<5;i++){
+      if(i==3){f=30.;w=2.2e-4;}
+      float wt=smoothstep(.12,.4,w/px),k,sh;vec3 e;
+      if(wt>0.){
+        float m=hair(R*(p*f)+S+4.*float(i),R*n,R*vec3(.35,-1.1,.25),w*f,px*f,dn,k,e,sh)*wt;
+        c*=1.-.3*sh*wt*(1.-m);                                      // a hair shades the skin beside it
+        c=mix(c,mix(c,vec3(1.,.95,.84),.5+.2*k*k)*(1.-.2*k*k),m);   // it is pale and hollow: more of the skin's colour comes through its middle than its sides
+        sl=sl*(1.-m)-(e*R)*(1.6*k*m);spe+=.25*m;                    // and round: sloping away to either side
+      }
+      R=M*R;f*=1.14;
+    }
+  }
+}
+#endif
 vec2 sph(vec3 o,vec3 d,float r2){float b=dot(o,d),h=b*b-dot(o,o)+r2;return h<0.?vec2(1e3,-1e3):vec2(-b-sqrt(h),-b+sqrt(h));} // where a ray enters and leaves a sphere
 void main(){
-  vec2 uv=(2.*gl_FragCoord.xy-R)/R.y;
-  vec3 ro=vec3(0.,.1,3.6),rd=normalize(vec3(uv,-2.6)),L=normalize(vec3(-.6,.7,.8)),up=vec3(0.,1.,0.);
-  // everything from here happens in the peach's own frame, so camera, light and sky are turned into it
-  ro.yz=rot(A.y)*ro.yz;rd.yz=rot(A.y)*rd.yz;L.yz=rot(A.y)*L.yz;up.yz=rot(A.y)*up.yz;
-  ro.xz=rot(A.x)*ro.xz;rd.xz=rot(A.x)*rd.xz;L.xz=rot(A.x)*L.xz;up.xz=rot(A.x)*up.xz;
+  vec2 uv=(gl_FragCoord.xy-V.xy)*V.z;
+  // everything happens in the peach's own frame, so camera, light and sky are turned into it
+  vec3 ro=C*vec3(0.,.1,3.6),rd=C*normalize(vec3(uv,-2.6)),L=C*normalize(vec3(-.6,.7,.8)),up=C[1];
   // two spheres hold everything: one round the fruit (or round the pit, once that is all there is), one round stem and leaf
   vec2 s1=ST<1.5?sph(ro,rd,GONE<.5?1.37:.36):vec2(1e3,-1e3),s2=GONE<.5&&ST>.5?sph(ro-vec3(.2,1.,.03),rd,.4):vec2(1e3,-1e3);
-  float px=2.8/R.y,t=min(s1.x,s2.x),tend=max(s1.y,s2.y),tm=t,md=1e3,id=0.; // px: a pixel's width on the peach
+  float px=1.4*V.z,t=min(s1.x,s2.x),tend=max(s1.y,s2.y),tm=t,md=1e3,id=0.; // px: a pixel's width on the peach
   if(t>tend){gl_FragColor=vec4(0.);return;}
   bool hit=true; // a ray that runs out of steps is skimming a surface, and counts as having reached it
   for(int i=0;i<100;i++){vec2 m=map(ro+rd*t);if(m.x<md){md=m.x;tm=t;id=m.y;}if(m.x<.45*px)break;t+=m.x*.85;if(t>tend){hit=false;break;}}
@@ -366,10 +465,10 @@ void main(){
   float a=max(hit?1.:1.-smoothstep(0.,1.07*px,md),.3*halo*halo);
   if(a<=0.){gl_FragColor=vec4(0.);return;}
   vec3 p=ro+rd*(hit?t:tm),g=nor(p,max(.5*px,.0008)),col;
-  float spe=.3,shn=18.,fz=0.,sub=0.,wet=0.; // highlight strength and tightness, fuzz, how much light passes through, juice
+  float spe=.3,shn=18.,fz=0.,sub=0.,wet=0.,cov=0.; // highlight strength and tightness, fuzz, how much light passes through, juice, blush
   if(id<.5){
     vec4 k=skinC(p,px,fz);wet=smoothstep(-.09,-.012,bites(p,0.)); // juice runs over the edge of a bite and mats the fuzz
-    col=k.rgb*(1.-.18*wet);fz*=1.-wet;spe=mix(.34-.26*fz,.4,wet);shn=mix(14.,70.,wet);sub=.1;wet*=.4;
+    col=k.rgb*(1.-.18*wet);fz*=1.-wet;cov=k.a;spe=mix(.34-.26*fz,.4,wet);shn=mix(14.,70.,wet);sub=.1;wet*=.4;
   }else if(id<1.5){
     float hh;stem(p,hh);vec3 pa=p-vec3(.04,1.2,0.);
     col=mix(vec3(.30,.19,.10),vec3(.50,.34,.18),vn(p*vec3(50.,7.,50.)+S));
@@ -394,6 +493,11 @@ void main(){
     spe=.1;shn=10.;
   }
   vec3 n=bump(p,g,id,px);
+#ifdef FINE
+  if(px<.0033){ // under the glass: never in the normal view, where a pixel is wider than this. (A pixel covers more of a surface seen from the side.)
+    vec3 sl=vec3(0.);fineness(p,g,px/max(.25,-dot(g,rd)),id,cov,fz,col,sl,spe);n=normalize(n-sl);
+  }
+#endif
   float ndl=dot(n,L),dif=clamp(ndl,0.,1.),ndv=clamp(-dot(n,rd),0.,1.),sh=1.,occ=1.,thin=dif;
 #ifndef LITE
   if(hit){occ=ao(p,g);sh=dot(g,L)>0.?shadow(p+g*.004,L):0.;if(sub>0.)thin=smoothstep(-.07,.05,map(p+L*.11).x);}
@@ -413,21 +517,27 @@ void main(){
 // If it will not build, a LITE build is tried (see the shader) before giving up on the peach.
 let gl = null, ready = false, lite = false, pr, kpc, loc;
 let timed = 0, best = Infinity, cost = 0; // frames timed so far, the fastest of them, and from that the milliseconds one pixel of peach takes this GPU
-function build() {
-  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
-  pr = gl.createProgram();
-  gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 v;void main(){gl_Position=vec4(v,0.,1.);}'));
-  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, (lite ? '#define LITE\n' : '') + FS));
-  gl.bindAttribLocation(pr, 0, 'v'); gl.linkProgram(pr);
+// The fine detail that zooming in brings out goes into a program of its own (glass). So the normal view's is no bigger, and no slower to build, than
+// it was; and a GPU that will not build the second still has the first to zoom with. Where the browser can build a program on the side, the glass is
+// begun as soon as the first has been drawn and timed; where it cannot, building holds the page up, so that waits until the peach is first zoomed in on.
+// glassy: 0 not begun, 1 being built, 2 built, -1 it would not build. locs: where each program keeps its uniforms (the first's, then the glass's).
+let glass, glassy = 0; const locs = [];
+function make(def) {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; }, p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, 'attribute vec2 v;void main(){gl_Position=vec4(v,0.,1.);}'));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, def + FS));
+  gl.bindAttribLocation(p, 0, 'v'); gl.linkProgram(p); return p;
 }
+const build = () => pr = make(lite ? '#define LITE\n' : '');
+const where = p => Object.fromEntries(['V', 'C', 'B', 'U', 'Z', 'S', 'NB', 'ST', 'GONE'].map(n => [n, gl.getUniformLocation(p, n)]));
 function noPeach() { // landscape + text still work
-  gl = null; peach.hidden = grip.hidden = spot.hidden = true; trivia.textContent = triviaText;
+  gl = null; peach.hidden = seat.hidden = grip.hidden = spot.hidden = true; trivia.textContent = triviaText;
   const c = document.querySelector('.s p'); if (c) c.textContent = 'Scroll on.';
 }
 function linked() { // asked every frame until the peach can be drawn
   if (kpc && !gl.getProgramParameter(pr, kpc.COMPLETION_STATUS_KHR)) return false;
   if (gl.getProgramParameter(pr, gl.LINK_STATUS)) {
-    gl.useProgram(pr); loc = Object.fromEntries(['R', 'A', 'B', 'U', 'Z', 'S', 'NB', 'ST', 'GONE'].map(n => [n, gl.getUniformLocation(pr, n)]));
+    gl.useProgram(pr); loc = locs[0] = where(pr);
     peach.style.opacity = ''; return ready = true;
   }
   console.error(gl.getProgramInfoLog(pr), ...(gl.getAttachedShaders(pr) || []).map(s => gl.getShaderInfoLog(s)));
@@ -440,7 +550,7 @@ try {
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   build(); peach.style.opacity = 0; // fades in once built
-} catch (e) { console.error(e); gl = null; peach.hidden = grip.hidden = spot.hidden = true; } // no WebGL
+} catch (e) { console.error(e); gl = null; peach.hidden = seat.hidden = grip.hidden = spot.hidden = true; } // no WebGL
 
 // Every peach is its own: a seed picks its blush, speckle, bruises and scar, and is remembered like the bites are.
 const S = new Float32Array(3), Z = new Float32Array(12);
@@ -499,7 +609,7 @@ grip.addEventListener('click', e => { // on the grip: the circle over the fruit 
   if (!ready || feast || dragged) return; // a hold that turned the peach was not a tap
   if (bites.length >= MAXB) { bites = []; grow(1 + Math.floor(Math.random() * 1e6)); saveBites(); return; } // tapping the pit grows a fresh peach
   // the tap as a ray in peach space, through the shader's camera; a sphere of radius 1.05 stands in for the peach
-  const r = peach.getBoundingClientRect(), ux = (e.clientX - r.left) / r.width * 2 - 1, uy = 1 - (e.clientY - r.top) / r.height * 2, len = Math.hypot(ux, uy, 2.6);
+  const [ux, uy] = uvAt(e.clientX, e.clientY), len = Math.hypot(ux, uy, 2.6);
   const ro = [0, .1, 3.6], rd = [ux / len, uy / len, -2.6 / len];
   [ro[1], ro[2]] = rot2(ro[1], ro[2], A[1]); [rd[1], rd[2]] = rot2(rd[1], rd[2], A[1]);
   [ro[0], ro[2]] = rot2(ro[0], ro[2], A[0]); [rd[0], rd[2]] = rot2(rd[0], rd[2], A[0]);
@@ -521,16 +631,19 @@ grip.addEventListener('click', e => { // on the grip: the circle over the fruit 
   if (bites.length >= MAXB && !still) feastOn(at, ro); else navigator.vibrate?.(15); // with reduced motion the peach is simply gone
 });
 
-const see = P => { // where a point of the peach shows on its canvas, as fractions of its width and height: the shader's camera, the other way round
+const see = P => { // where a point of the peach shows on its canvas, as fractions of its width and height: the shader's camera and the view, the other way round
   let [x, y, z] = P; [x, z] = rot2(x, z, -A[0]); [y, z] = rot2(y, z, -A[1]);
-  const k = 1.3 / (3.6 - z); return [.5 + x * k, .5 - (y - .1) * k];
+  const k = 2.6 / (3.6 - z), s = seat.getBoundingClientRect(), c = peach.getBoundingClientRect(), h = s.width * zoom / 2;
+  return [(s.left + s.width / 2 + (x * k - cx) * h - c.left) / c.width, (s.top + s.height / 2 - ((y - .1) * k - cy) * h - c.top) / c.height];
 };
 // Stem and leaf fall: one frame of them alone goes to a canvas of its own, laid exactly over the peach, and that topples off the bottom of the screen.
 function drop() {
+  const [ox, oy] = see([.2, 1, .03]); // it turns about its own middle
+  if (Math.abs(ox - .5) > 1 || Math.abs(oy - .5) > 1) return; // zoomed in on some other part of the peach: there would be nothing to see fall
   gl.uniform1f(loc.ST, 2); paint();
   const r = peach.getBoundingClientRect(), box = document.body.appendChild(document.createElement('div')), c = box.appendChild(document.createElement('canvas'));
   c.width = peach.width; c.height = peach.height; c.getContext('2d').drawImage(peach, 0, 0);
-  const [ox, oy] = see([.2, 1, .03]), side = Math.sign(see([.65, 1.26, 0])[0] - see([0, .87, 0])[0]) || 1, T = 1100; // it turns about its own middle, and goes the way the leaf leans
+  const side = Math.sign(see([.65, 1.26, 0])[0] - see([0, .87, 0])[0]) || 1, T = 1100; // it goes the way the leaf leans
   box.style.cssText = `position:fixed;z-index:2;left:${r.left}px;top:${r.top}px;pointer-events:none`;
   c.style.cssText = `display:block;width:${r.width}px;height:${r.height}px;transform-origin:${ox * 100}% ${oy * 100}%`;
   // a small hop as it comes loose, then gravity; all the while it drifts sideways and turns at a steady rate
@@ -538,39 +651,88 @@ function drop() {
   c.animate([{ transform: 'none' }, { transform: `translateX(${side * r.width * .45}px) rotate(${side * 200}deg)` }], { duration: T, fill: 'forwards' });
 }
 const pixel = new Uint8Array(4);
-function paint() { gl.viewport(0, 0, peach.width, peach.height); gl.uniform2f(loc.R, peach.width, peach.height); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+// The view of the peach. zoom: 1 as the page shows it, more when it is zoomed in on. (cx, cy): the point of that normal picture, in the shader's units, that
+// lies at the middle of the peach's seat: (0, 0) in the normal view, and never further from it than still lets the picture close back to normal as zoom
+// falls to 1. zto: the zoom it is on its way to, about the point (zx, zy) of the screen. The furthest in it goes is where a pixel of the screen is a
+// hundred-thousandth of the peach's radius, which on a real peach would be about a third of a micron: finer than that, the GPU's arithmetic gives out.
+let zoom = 1, cx = 0, cy = 0, zto = 1, zx = 0, zy = 0;
+const zmax = () => lite ? 6 : glassy < 0 ? 40 : 2e5 / clamp(seat.clientWidth, 100, 420); // (without the fine detail there is nothing further in to see)
+const bound = () => { const m = 1 - 1 / zoom; cx = clamp(cx, -.8 * m, .8 * m); cy = clamp(cy, -.87 * m, .95 * m); }; // the picture's own edges: fruit, stem and leaf
+const uvAt = (x, y) => { const r = seat.getBoundingClientRect(), k = 2 / (r.width * zoom); return [cx + (x - r.left - r.width / 2) * k, cy + (r.top + r.height / 2 - y) * k]; }; // the point of the normal picture that shows at a point of the screen
+function zoomAt(z, x, y) { // zooms to z, keeping what shows at (x, y) on the screen where it is (as far as the picture's edges allow)
+  z = clamp(z, 1, zmax());
+  const r = seat.getBoundingClientRect(), k = 2 / r.width * (1 / zoom - 1 / z);
+  cx += (x - r.left - r.width / 2) * k; cy += (r.top + r.height / 2 - y) * k; zoom = z; bound();
+}
+function paint() {
+  const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, c = peach.getBoundingClientRect(), s = seat.getBoundingClientRect();
+  const k = h / (c.height || 1), u = 2 / ((s.height || 1) * k * zoom); // k: canvas pixels to a CSS pixel. u: how much of the normal picture one of them shows
+  gl.viewport(0, 0, w, h);
+  gl.uniform3f(loc.V, (s.left + s.width / 2 - c.left) * w / (c.width || 1) - cx / u, h - (s.top + s.height / 2 - c.top) * k - cy / u, u);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
 // The peach can be taken hold of and turned, like a model in the hand. yaw and tilt are how far the visitor has turned and tipped it, on top of the half
 // turn a scene that scrolling gives it; vel is what a flick left it with; idle is its own slow turn, which waits (ramp) while it is handled and for a few
-// seconds after. held: the pointer that has hold of it, plus one. dragged: that hold has moved it, so was no tap.
-let yaw = 0, tilt = 0, idle = 0, ramp = +!still, vel = 0, held = 0, dragged = false, moved = 0, lastX = 0, lastY = 0, lastT = 0, touched = -1e9, then = 0;
+// seconds after, and for as long as it is zoomed in on. pts: the fingers, or the mouse, that are down on it, and where each was last. held: the one that
+// is turning it, plus one. dragged: that hold has moved it, so was no tap. span, midX, midY: two fingers, how far apart they were and the point between them.
+let yaw = 0, tilt = 0, idle = 0, ramp = +!still, vel = 0, held = 0, dragged = false, moved = 0, lastT = 0, touched = -1e9, then = 0, span = 1, midX = 0, midY = 0;
+const pts = new Map();
+// Zoomed in on, the peach fills the screen, and a frame of it can cost a GPU many times what the normal view does. So while the picture is changing it is
+// drawn with as few pixels as it takes to keep it moving; once it has stopped changing (calm) it is drawn once more with all the pixels a moment's work
+// allows (fine), and then left alone (sharp) until something changes. seen: what the last frame showed. stirred: when that last changed.
+// veiled: the fruit hides the whole landscape, which can rest too. shown: how much of the page's text shows.
+let seen = '', stirred = 0, fine = false, sharp = false, veiled = false, shown = 1;
+const covers = () => { // whether the fruit hides everything behind it: its outline, even bitten into all the way round, reaches past every corner of the screen
+  const s = seat.getBoundingClientRect(), h = s.width * zoom / 2, x = s.left + s.width / 2 - cx * h, y = s.top + s.height / 2 + (.072 + cy) * h; // (x, y): where the middle of the fruit shows
+  return .55 * h > Math.hypot(Math.max(x, W - x), Math.max(y, H - y));
+};
 function frame(ms) {
   const t = ms / 1000, e = still ? 1 : .08, gap = (ms - then) / 1000, dt = gap > 0 && gap < .25 ? gap : .016; then = ms; // dt: real time, however slowly the frames come; a longer gap is the page having been away
-  if (!held) {
-    if (vel) { const k = Math.exp(-dt * 2.5); yaw += vel * (1 - k) / 2.5; vel *= k; if (Math.abs(vel) < .2) vel = 0; } // flung: it turns on, and slows
-    const rest = !still && !vel && ms - touched > 3000; // left alone a while: it turns slowly by itself again, and rights itself
-    ramp += (rest - ramp) * (1 - Math.exp(-dt * 2)); idle += dt * .25 * ramp; if (rest) tilt *= Math.exp(-dt);
+  if (!pts.size) {
+    if (vel) { const k = Math.exp(-dt * 2.5); yaw += vel * (1 - k) / 2.5; vel *= k; if (Math.abs(vel) < .2 / zoom) vel = 0; } // flung: it turns on, and slows
+    const rest = zoom == 1 && zto == 1 && !still && !vel && ms - touched > 3000; // left alone a while, and not under the glass: it turns slowly by itself again, and rights itself
+    ramp += (rest - ramp) * (1 - Math.exp(-dt * 2)); idle += dt * .25 * ramp / zoom; if (rest) tilt *= Math.exp(-dt);
+    if (zto > 1 && zto < 1.06 && ms - touched > 250) zto = 1; // left all but back to normal, it goes the rest of the way
   }
+  if (zoom != zto) zoomAt(still || Math.abs(Math.log(zto / zoom)) < .002 ? zto : zoom * Math.pow(zto / zoom, 1 - Math.exp(-dt * 14)), zx, zy); // the wheel says how far; it goes there quickly, but not at a jump
+  const big = zoom > 1, o = clamp(1 - (zoom - 1) / .35, 0, 1); // the text makes way as soon as the peach starts to grow
+  if (o != shown) { shown = o; if (o < 1) document.documentElement.style.setProperty('--o', o); else document.documentElement.style.removeProperty('--o'); }
   pc += (p - pc) * e; pxc += (px - pxc) * e; pyc += (py - pyc) * e;
-  draw(t);
+  if (!veiled) draw(t);
   if (gl && (ready || linked())) {
-    A = [pc * Math.PI + yaw + idle, tilt]; // half a turn per scene, as ever; the visitor's own turning and tipping; its slow turn of its own. (It no longer leans after the mouse, which can take hold of it now: the two fought. The landscape still does)
+    A = [pc * Math.PI + yaw + idle, tilt]; // half a turn per scene, as ever; the visitor's own turning and tipping; its slow turn of its own. (It no longer leans after the mouse, which can take hold of it now: the two fought. The landscape still does.)
     if (feast) { // which of its bites are due by now?
       const k = Math.max(1, Math.floor((ms - feast) / BEAT) + 1);
       if (k > FEAST) { feast = 0; caption(); timed = 0; best = Infinity; } // over: only the pit is left, and that is cheap to draw, so time it again
-      else if (k > taken) { taken = k; peach.animate?.([{ transform: 'scale(.96)' }, { transform: 'none' }], BEAT); } // each one jolts the fruit
+      else if (k > taken) { taken = k; if (!big) peach.animate?.([{ transform: 'scale(.96)' }, { transform: 'none' }], BEAT); } // each one jolts the fruit
     }
-    gl.uniform2f(loc.A, A[0], A[1]); gl.uniform4fv(loc.B, bitesArr); gl.uniform4fv(loc.U, jawArr); gl.uniform4fv(loc.Z, Z); gl.uniform3fv(loc.S, S);
-    const gone = !feast && bites.length >= MAXB, st = +(feast ? stem && taken <= stemTill : stem);
-    gl.uniform1i(loc.NB, Math.min(bites.length, MAXB - 1) + (feast && taken)); gl.uniform1f(loc.GONE, gone);
-    if (stood && !st && !gone && !still && peach.animate) drop(); // a bite has just taken the stem's footing; with reduced motion it simply goes
-    stood = st; gl.uniform1f(loc.ST, st);
-    const t0 = performance.now();
-    paint();
-    if (timed < 3 && !feast) { // three frames are timed, and the fastest counts (the very first also pays for driver warm-up)
-      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); const t1 = performance.now(); // this one waits for the GPU to finish the frame
-      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);                              // this one for nothing, so it shows what the asking costs
-      best = Math.min(best, Math.max(0, 2 * t1 - t0 - performance.now()));
-      if (++timed == 3) { cost = best / (peach.width * peach.height); if (fit()) paint(); } // resizing a canvas clears it
+    const gone = !feast && bites.length >= MAXB, st = +(feast ? stem && taken <= stemTill : stem), nb = Math.min(bites.length, MAXB - 1) + (feast && taken), sr = big && seat.getBoundingClientRect();
+    const view = [A[0], A[1], zoom, cx, cy, nb, +gone, st, seed, sr && [sr.left, sr.top, sr.width]].join();
+    if (view != seen) { seen = view; stirred = ms; }
+    const calm = big && !feast && ms - stirred > 200, turn = big != stage.classList.contains('zoomed');
+    if (turn) { stage.classList.toggle('zoomed', big); out.hidden = !big; } // into its seat, or out of it to fill the screen
+    if (big || turn) { fine = calm; fit(); const x = (zoom < 10 ? zoom.toFixed(1) : Math.round(zoom)) + '×'; if (mag.textContent != x) mag.textContent = x; }
+    if (!glassy && !lite && (big || kpc && timed >= 3)) { glass = make('#define FINE\n'); glassy = 1; } // the fine detail: begun here, and asked after every frame until it is built
+    else if (glassy == 1 && (!kpc || gl.getProgramParameter(glass, kpc.COMPLETION_STATUS_KHR))) {
+      if (gl.getProgramParameter(glass, gl.LINK_STATUS)) { locs[1] = where(glass); glassy = 2; sharp = false; } // (a picture at rest is drawn again, with it)
+      else { console.warn(gl.getProgramInfoLog(glass)); glassy = -1; zto = Math.min(zto, zmax()); }
+    }
+    if (!(calm && sharp)) {
+      const lens = +(big && glassy == 2), [sx, sy, kx, ky] = [Math.sin(A[0]), Math.sin(A[1]), Math.cos(A[0]), Math.cos(A[1])];
+      if (loc != locs[lens]) { gl.useProgram(lens ? glass : pr); loc = locs[lens]; } // zoomed in on, it is drawn with the fine detail, once there is any
+      gl.uniformMatrix3fv(loc.C, false, [kx, 0, -sx, -sx * sy, ky, -kx * sy, sx * ky, sy, kx * ky]); // tipped, then turned: worked out here, where the arithmetic is finer than a GPU's
+      gl.uniform4fv(loc.B, bitesArr); gl.uniform4fv(loc.U, jawArr); gl.uniform4fv(loc.Z, Z); gl.uniform3fv(loc.S, S);
+      gl.uniform1i(loc.NB, nb); gl.uniform1f(loc.GONE, gone);
+      if (stood && !st && !gone && !still && peach.animate) drop(); // a bite has just taken the stem's footing; with reduced motion it simply goes
+      stood = st; gl.uniform1f(loc.ST, st);
+      const t0 = performance.now();
+      paint(); sharp = calm; veiled = big && !gone && !feast && covers();
+      if (timed < 3 && !feast && !big) { // three frames are timed, and the fastest counts (the very first also pays for driver warm-up)
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); const t1 = performance.now(); // this one waits for the GPU to finish the frame
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);                              // this one for nothing, so it shows what the asking costs
+        best = Math.min(best, Math.max(0, 2 * t1 - t0 - performance.now()));
+        if (++timed == 3) { cost = best / (peach.width * peach.height); if (fit()) paint(); } // resizing a canvas clears it
+      }
     }
   }
   requestAnimationFrame(frame);
@@ -583,7 +745,7 @@ function onScroll() {
   // Clamped to the last section's resting place, so nothing turns or fades on the bounce at either end, or in the extra scroll the bars allow.
   const sec = Math.max(1, sections[0] ? sections[0].getBoundingClientRect().height : 0), y = clamp(scrollY, 0, sec * (N - 1)); // to the fraction of a pixel; never 0, even in a frame with no height yet
   p = y / sec;
-  const end = peach.offsetTop + peach.offsetHeight + H * .05; // a caption whose top is this high has vanished: that is a little under the peach's canvas
+  const end = seat.offsetTop + seat.offsetHeight + H * .05; // a caption whose top is this high has vanished: that is a little under the peach's seat
   for (const c of captions) {
     const s = c.offsetParent; if (!s) continue; // not shown at all (short landscape phones)
     const t = clamp((s.offsetTop + c.offsetTop - y - end) / Math.max(1, c.offsetTop - end), 0, 1), o = (t * t).toFixed(3); // 1 where it rests, 0 at end, falling away quickly
@@ -593,12 +755,18 @@ function onScroll() {
 // The peach's layer has no text in it, so the block under the peach is kept as tall as the text under its spot: then both layers centre alike.
 const level = () => under.style.height = (trivia.offsetHeight ? trivia : h1).getBoundingClientRect().bottom - h1.getBoundingClientRect().top + 'px'; // from the top of the heading to the bottom of whatever comes last
 if (window.ResizeObserver) for (const e of [h1, trivia]) new ResizeObserver(level).observe(e);
-let dpr = 1;
+let dpr = 1; const DETAIL = 1.2; // measured: a screenful of peach costs twice what the normal view's canvas does, pixel for pixel, and the fine detail little more
 function fit() { // sizes the peach canvas, and says whether that changed it
-  // a peach that would take this GPU more than 8 ms a frame is rendered with fewer pixels, enough to take 6, and stretched back to size by CSS
-  const r = peach.getBoundingClientRect(), est = cost * r.width * r.height * dpr * dpr, q = est > 8 ? Math.max(.4, Math.sqrt(6 / est)) : 1;
-  const w = Math.round(r.width * dpr * q), h = Math.round(r.height * dpr * q), changed = peach.width != w || peach.height != h;
-  if (changed) { peach.width = w; peach.height = h; }
+  // A peach that would take this GPU more than 8 ms a frame is rendered with fewer pixels, enough to take 6, and stretched back to size by CSS. Zoomed in
+  // on, when it is drawn over the whole screen, that can be a good many fewer (and then they come in steps, or the canvas would be made anew every frame);
+  // but a picture that has stopped changing (fine) is drawn only the once, so it is given some fifteen times as long, and every pixel the screen has.
+  const r = peach.getBoundingClientRect(), big = zoom > 1, s = big ? seat.getBoundingClientRect().width : r.width, d = fine ? Math.min(devicePixelRatio || 1, 3) : dpr;
+  const [most, aim, least] = fine ? [150, 110, .4] : big ? [10, 8, .3] : [8, 6, .4];
+  const est = cost * 2 * Math.min(r.width * r.height, .5 * s * s * zoom * zoom) * d * d * (big ? DETAIL : 1); // cost was measured on the normal view, half of which is peach
+  let q = est > most ? Math.max(least, Math.sqrt(aim / est)) : 1;
+  if (big) q = Math.min(fine ? q : 2 ** (Math.floor(Math.log2(q) * 4) / 4), Math.sqrt(6e6 / (r.width * r.height * d * d || 1))); // and never more pixels than a large screen has
+  const w = Math.round(r.width * d * q), h = Math.round(r.height * d * q), changed = peach.width != w || peach.height != h;
+  if (changed) { peach.width = w; peach.height = h; sharp = false; }
   return changed;
 }
 function resize() {
@@ -607,35 +775,72 @@ function resize() {
   const w = Math.round(W * dpr), h = Math.round(H * dpr);
   if (land.width != w || land.height != h) { land.width = w; land.height = h; } // only when it changes: setting either one wipes the canvas
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  level(); fit(); onScroll();
+  level(); zto = Math.min(zto, zmax()); fit(); onScroll(); // (a smaller seat may be zoomed in on less far)
 }
 addEventListener('scroll', onScroll, { passive: true });
 addEventListener('resize', resize);
 addEventListener('pointermove', e => { if (e.pointerType == 'mouse') { px = e.clientX / W * 2 - 1; py = e.clientY / H * 2 - 1; } }); // mouse only: phones get scroll and touch, and are never asked for motion access
 // Taking hold of the peach: a finger or the mouse put down on it turns it left and right, so that the spot under the finger stays under the finger, and
 // tips it up and down. Less than a few pixels of that is a tap, and a tap is a bite (the click above). The page does not scroll under a finger that
-// is on the peach; everywhere else it scrolls as it always has.
-grip.addEventListener('pointerdown', e => {
-  if (e.button || held && !e.isPrimary) return; // the main button, and one hold at a time
-  held = e.pointerId + 1; dragged = false; moved = 0; lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp; vel = ramp = 0; touched = performance.now();
+// is on the peach; everywhere else it scrolls as it always has. Two fingers zoom: spread apart they bring what lies between them closer, and moved
+// together they slide the picture along. The second may come down beside the peach, so long as the first has hold of it.
+const hush = e => { if (e.cancelable) e.preventDefault(); }; // for browsers that would scroll or zoom the page along regardless
+const two = () => { const [a, b] = [...pts.values()]; span = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1; midX = (a[0] + b[0]) / 2; midY = (a[1] + b[1]) / 2; };
+function down(e) {
+  if (e.button || pts.size > 1 || pts.has(e.pointerId)) return; // the main button, and two fingers at most
+  if (!pts.size) addEventListener('touchmove', hush, { passive: false }); // only while it is held: a listener like this slows every scroll it is there for
+  const caught = zoom > 1 && vel != 0; // zoomed in on, a finger put down on a peach still turning from a flick only stops it: a bite there would take away what was being looked at
+  pts.set(e.pointerId, [e.clientX, e.clientY]); vel = ramp = 0; lastT = e.timeStamp; touched = performance.now();
   try { grip.setPointerCapture(e.pointerId); } catch (x) {} // the hold outlasts the finger sliding off the peach
-});
+  if (pts.size == 1) { held = e.pointerId + 1; dragged = caught; moved = 0; }
+  else { held = 0; dragged = true; zto = zoom; two(); } // two fingers are no tap
+}
+grip.addEventListener('pointerdown', down);
+addEventListener('pointerdown', e => { if (pts.size == 1 && e.pointerType == 'touch' && e.target != grip) down(e); }, true);
 grip.addEventListener('pointermove', e => {
-  if (e.pointerId + 1 != held) return;
-  const dx = e.clientX - lastX, dy = e.clientY - lastY, dt = Math.max(1, e.timeStamp - lastT) / 1000; lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp;
+  const at = pts.get(e.pointerId); if (!at) return;
+  const dx = e.clientX - at[0], dy = e.clientY - at[1], dt = Math.max(1, e.timeStamp - lastT) / 1000, k = 2 / ((seat.getBoundingClientRect().width || 1) * zoom); // k: how much of the normal picture a pixel of the screen shows
+  at[0] = e.clientX; at[1] = e.clientY;
+  if (pts.size > 1) { // the picture goes with the fingers: slid as far as the point between them has moved, and scaled by how much further apart they are
+    const s0 = span, x0 = midX, y0 = midY; two();
+    cx -= (midX - x0) * k; cy += (midY - y0) * k; zoomAt(zoom * span / s0, midX, midY); zto = zoom; touched = performance.now();
+    return;
+  }
+  lastT = e.timeStamp;
   if (!dragged && (moved += Math.hypot(dx, dy)) < 6) return; // no more than a tap so far
   dragged = true; grip.classList.add('held');
-  const k = 2 / (peach.clientWidth || 1), d = -dx * k; // radians to a pixel: what keeps the front of the peach under the finger
+  const d = -dx * k; // k is also radians to a pixel: what keeps the front of the peach under the finger, however far in the view is
   yaw += d; tilt = clamp(tilt + dy * k, -1.2, 1.2); vel += (d / dt - vel) * (1 - Math.exp(-dt * 20)); touched = performance.now();
 });
 const release = e => {
-  if (e.pointerId + 1 != held) return;
-  held = 0; touched = performance.now(); grip.classList.remove('held');
-  vel = !dragged || still || e.type == 'pointercancel' || e.timeStamp - lastT > 80 ? 0 : clamp(vel, -14, 14); // let go while it is moving, and it keeps turning
+  if (!pts.delete(e.pointerId)) return;
+  touched = performance.now();
+  if (pts.size) { held = pts.keys().next().value + 1; lastT = e.timeStamp; vel = 0; return; } // one of two has let go: the other has hold of it still, and turns it
+  held = 0; grip.classList.remove('held'); removeEventListener('touchmove', hush);
+  vel = !dragged || still || e.type == 'pointercancel' || e.timeStamp - lastT > 80 ? 0 : clamp(vel, -14 / zoom, 14 / zoom); // let go while it is moving, and it keeps turning
 };
 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) grip.addEventListener(type, release); // however the hold ends
-grip.addEventListener('touchmove', e => { if (e.cancelable && e.touches.length == 1) e.preventDefault(); }, { passive: false }); // for browsers that would scroll the page along regardless
-addEventListener('blur', () => { held = 0; grip.classList.remove('held'); }); // a hold the window lost track of
+grip.addEventListener('touchmove', hush, { passive: false });
+addEventListener('blur', () => { pts.clear(); held = 0; grip.classList.remove('held'); removeEventListener('touchmove', hush); }); // a hold the window lost track of
+// The wheel, rolled over the peach, zooms: in on whatever the pointer is on, and out again as far as the normal view and no further. From there, rolled
+// the same way, it scrolls the page on as it always has; but not in the same breath (rolled: when it last zoomed), or zooming out would run on into
+// scrolling. A pinch on a trackpad comes as a wheel with Ctrl held, or in Safari as events of its own, and maps finger to picture as a pinch on a screen does.
+let rolled = -1e9, pinched = 0;
+grip.addEventListener('wheel', e => {
+  if (!ready) return;
+  const now = performance.now(), d = e.deltaY * (e.deltaMode == 1 ? 32 : e.deltaMode == 2 ? 400 : 1); // lines and pages, for mice that count in those
+  if (zto == 1 && d >= 0 && !e.ctrlKey) { if (now - rolled < 350) { rolled = now; e.preventDefault(); } return; }
+  e.preventDefault(); rolled = touched = now; vel = ramp = 0;
+  zto = clamp(zto * Math.exp(-d * (e.ctrlKey ? .01 : .0028)), 1, zmax()); zx = e.clientX; zy = e.clientY;
+  if (e.ctrlKey) zoomAt(zto, zx, zy); // a pinch is followed, not eased after
+}, { passive: false });
+grip.addEventListener('gesturestart', e => { e.preventDefault(); pinched = zoom; });
+grip.addEventListener('gesturechange', e => { e.preventDefault(); if (pinched && pts.size < 2) { zoomAt(pinched * e.scale, midX = e.clientX, midY = e.clientY); zto = zoom; touched = performance.now(); } }); // (two fingers on a screen are followed above)
+grip.addEventListener('gestureend', e => { e.preventDefault(); pinched = 0; });
+// The way back to the normal view without rolling or pinching all the way: the button that shows while it is zoomed in on, or Escape.
+const home = () => { const r = seat.getBoundingClientRect(); zto = 1; zx = r.left + r.width / 2; zy = r.top + r.height / 2; vel = 0; touched = performance.now(); };
+out.onclick = home;
+addEventListener('keydown', e => { if (e.key == 'Escape' && zto > 1) home(); });
 
 const LINES = [gl ? 'Take a bite, then scroll.' : 'Scroll on.', 'You gave me a peach.', 'It was a good peach.', 'Ripe, sweet, gone in a minute.', 'I wanted you to know.', 'Thank you.'];
 console.assert(LINES.length == N, 'one line per scene');
