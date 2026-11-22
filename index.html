@@ -25,7 +25,8 @@
   @media (pointer: coarse) { html { scroll-snap-type: y proximity; } }
   #land, .hero { position: fixed; inset: 0; width: 100%; height: 100%; }
   .hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vmin; padding: 0 1rem; box-sizing: border-box; pointer-events: none; }
-  #peach { width: min(48vmin, 420px); aspect-ratio: 1; pointer-events: auto; touch-action: pan-y; cursor: pointer; }
+  #peach { width: min(48vmin, 420px); aspect-ratio: 1; pointer-events: auto; touch-action: pan-y; cursor: pointer; transition: opacity .5s; }
+  @media (prefers-reduced-motion: reduce) { #peach { transition: none; } }
   h1 { margin: 0; text-align: center; color: #fff; letter-spacing: -.02em;
        font: 700 clamp(2rem, 7vw, 5.5rem)/1.1 system-ui, -apple-system, "Segoe UI", sans-serif;
        text-shadow: 0 2px 6px rgba(0,0,0,.35), 0 10px 40px rgba(0,0,0,.35); }
@@ -146,121 +147,365 @@ function draw(t) {
   }
 }
 
-// Ray-marched peach: squashed sphere with a crease and a top dimple, a stem and one leaf.
+// Ray-marched peach, built the way the fruit is: fuzzy skin over flesh over a furrowed pit, so a bite cuts through all three.
+// map() holds the shapes. Anything finer than a few pixels (stipple, fibres, pores) is colour and bump, faded out before it can alias.
 const FS = `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
 #else
 precision mediump float;
+#define LITE
 #endif
-uniform vec2 R;uniform float T;uniform vec2 A;uniform vec3 B[7];uniform int NB;
+// R: canvas size. A: camera angles. B[i]: a bite's centre, and a random number of its own. U[i]: the jaw's axis across that bite, and 1/|centre|.
+// S: this peach's noise offset. Z[0], Z[1]: bruises, Z[2]: a scar (where on the fruit, how big). ST: 1 while the stem still has something to hold on to.
+uniform vec2 R,A;uniform vec4 B[7],U[7],Z[3];uniform vec3 S;uniform int NB;uniform float ST;
 #define MAXB 7
+#define TH .022 // how thick the skin is
 mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
-float cap(vec3 p,vec3 a,vec3 b,float r){vec3 pa=p-a,ba=b-a;float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);return length(pa-ba*h)-r;}
+#ifdef LITE
+// LITE: no shadows and no noise (its hash needs highp), so every random detail sits at its average
+#define DET 0.
+float vn(vec3 x){return .5;}
+float dots(vec3 x,float n){return 0.;}
+#else
+#define DET 1.
+vec3 h3(vec3 p){p=fract(p*vec3(.1031,.1030,.0973));p+=dot(p,p.yxz+33.33);return fract((p.xxy+p.yxx)*p.zyx);}
+#define G(c) dot(h3(i+c)*2.-1.,f-c)
+float vn(vec3 x){ // gradient noise, around .5 and mostly within .2 to .8
+  vec3 i=floor(x),f=fract(x),u=f*f*(3.-2.*f);vec2 o=vec2(0.,1.);
+  return .5+.6*mix(mix(mix(G(o.xxx),G(o.yxx),u.x),mix(G(o.xyx),G(o.yyx),u.x),u.y),mix(mix(G(o.xxy),G(o.yxy),u.x),mix(G(o.xyy),G(o.yyy),u.x),u.y),u.z);
+}
+float dots(vec3 x,float n){ // round specks: one to a cell in a fraction n of the cells, each of its own size
+  vec3 i=floor(x),r=h3(i),k=h3(i+7.);
+  return step(k.x,n)*(1.-smoothstep(.6,1.,length(fract(x)-.3-.4*r)/(.12+.16*k.y)));
+}
+#endif
+const mat3 M=mat3(.36,.48,-.8,-.8,.6,0.,.48,.64,.6); // turns each octave so the lattice never lines up with itself
+float fbm(vec3 p){float v=0.,a=.5;for(int i=0;i<4;i++){v+=a*vn(p);p=M*p*2.03+17.;a*=.5;}return .5+(v-.469)*1.3;}
+float fade(float f,float px){return 1.-smoothstep(.25,.7,f*px);} // 1 while detail of frequency f is wider than a pixel, 0 once it is not
+
 float ell(vec3 p,vec3 r){float k0=length(p/r),k1=length(p/(r*r));return k0*(k0-1.)/k1;}
-float groove(vec3 p){return exp(-p.x*p.x*32.)*smoothstep(-.3,.5,p.z)*smoothstep(-1.2,.1,p.y);}
-vec2 map(vec3 p){
-  float ch=abs(p.x)-.45; // cheeks: a soft bulge either side of the crease
-  float d=length(p*vec3(.93,.98,.96))-1.+.1*groove(p)-.07*exp(-ch*ch*6.)*smoothstep(-.4,.6,p.z)+.12*exp(-dot(p.xz,p.xz)*10.)*smoothstep(.2,1.,p.y);
-  vec2 r=vec2(d,0.);
-  for(int i=0;i<MAXB;i++){if(i>=NB)break;float b=.42-length(p-B[i]);if(b>r.x)r=vec2(b,3.);} // bites: spheres taken out of the flesh
-  if(NB>=MAXB)r=vec2(1e3,0.); // eaten: body, stem and leaf are gone
-  else{
-    float s=cap(p,vec3(0.,.75,0.),vec3(.04,1.2,0.),.05);if(s<r.x)r=vec2(s,1.);
-    vec3 q=p-vec3(.36,1.08,.06);q.xy=rot(.55)*q.xy;float l=ell(q,vec3(.36,.16,.07));if(l<r.x)r=vec2(l,2.);
+float groove(vec3 p){return exp(-p.x*p.x*32.)*smoothstep(-.3,.5,p.z)*smoothstep(-1.2,.1,p.y);} // the crease
+float cavity(vec3 p){return exp(-dot(p.xz,p.xz)*10.)*smoothstep(.2,1.,p.y);}                   // the dimple the stem sits in
+// Skin surface: squashed sphere, a crease with a cheek either side (one a little fuller), a dimple for the stem, a point at the tip, and some lumpiness.
+float body(vec3 p){
+  float e=length(p*vec3(.93,.98,.96))-1.;
+  if(e>.3)return e-.12; // too far off for the rest to matter
+  vec3 q=p-vec3(0.,-1.,.1);float ch=abs(p.x)-.45,a=1./(1.+dot(p.xz,p.xz)*35.),b=1./(1.+dot(q,q)*45.);
+  return e+.1*groove(p)-(.07+.012*p.x)*exp(-ch*ch*6.)*smoothstep(-.4,.6,p.z)+.12*cavity(p)
+    +.03*a*a*smoothstep(.4,1.,p.y)-.025*b*b+.012*sin(p.x*3.+S.x)*sin(p.y*2.6+p.z*3.2+S.y);
+}
+// What the bites take out (positive inside one). d: the skin surface at p, so the cut can treat skin and flesh differently.
+// Only the nearest bite gets its tooth marks worked out, and they fade where it runs into the next one, so the surface stays whole.
+float bites(vec3 p,float d){
+  float b=-1e3,b2=-1e3,c;vec3 o,q=vec3(0.);vec4 kb=vec4(0.),ku=vec4(0.); // b, q, kb, ku: the nearest bite. b2: the runner-up.
+  // Written out bite by bite, inside a loop of one so that break can stop at the last bite taken.
+  // Measured under software rendering, that costs a fraction of what indexing B[i] from a real loop does.
+  #define BITE(i) if(NB<=i)break;o=p-B[i].xyz;c=.42-length(o);if(c>b){b2=b;b=c;q=o;kb=B[i];ku=U[i];}else b2=max(b2,c);
+  for(int once=0;once<1;once++){BITE(0)BITE(1)BITE(2)BITE(3)BITE(4)BITE(5)}
+  if(b>.16)return b-.075; // well inside the hollow: its wall is at least this far off, however it is dented
+  if(b>-.1){ // close enough to see the teeth: s runs across them, v the way they travelled
+    float k=kb.w,s=dot(q,ku.xyz),v=dot(q,cross(kb.xyz,ku.xyz))*ku.w+(k-.5)*.08,f=smoothstep(0.,.07,b-b2);
+    float t=abs(fract(s*5.+k)*2.-1.),w=b-.075,m=max(0.,1.-v*v*250.);c=.022*t*t+.016*m*m; // a ridge left between each pair of teeth, a seam where upper and lower met
+    if(d>-TH*2.2)c+=(1.-smoothstep(TH*.6,TH*2.2,-d))*(.009+.05*(abs(fract(s*9.+k*3.)-.5)-.25)*(abs(fract(v*8.+k*5.)-.5)-.25)*4.); // skin is tougher: it stands proud of the flesh and tears unevenly
+    b=max(w,(b-c*f)*.7); // all that makes it a poor distance, so step short
   }
-  float k=ell(p,vec3(.3,.44,.22))+.012*sin(p.y*28.)*sin(p.x*24.+p.z*20.);if(k<r.x)r=vec2(k,4.); // the pit, wrinkled
+  return b;
+}
+// Stem: bowed, flared where it joins the fruit, knuckled and cut flat where it left the twig. h: 0 at the fruit, 1 at the cut.
+float stem(vec3 p,out float h){
+  vec3 pa=p-vec3(0.,.75,0.),ba=vec3(.04,.45,0.);
+  h=clamp(dot(pa,ba)/.2041,0.,1.);pa.z+=.12*h*(1.-h);
+  return max(length(pa-ba*h)-.04-.025*(1.-h)*(1.-h)-.013*smoothstep(.72,1.,h),(dot(pa,ba)-.2041)*2.214-.008)*.9;
+}
+// Leaf: lanceolate, toothed toward the tip, folded along the midrib and arched. x runs base to tip, y across the blade, z through it.
+vec3 leafP(vec3 p){p-=vec3(.36,1.08,.06);p.xy=rot(.55)*p.xy;return p;}
+float leafW(float u){return .42*sqrt(u)*(1.-u)+.007*fract(u*19.)*step(.08,u);}
+float leaf(vec3 q){
+  float u=clamp(q.x/.72+.5,0.,1.),w=leafW(u),y=abs(q.y),z=q.z-.3*y+.45*q.x*q.x;
+  float d=max(max((y-w)*.8,abs(q.x)-.36),abs(z)-.005-.016*clamp(1.-y/(w+.001),0.,1.));
+  return max(d,.045-length(q.xy-vec2(.07,.16)))*.8; // something else has had a bite of this
+}
+// Pit: flattened across the plane of the crease, squeezed toward its pointed tip, keeled along its seam and deeply furrowed.
+vec3 pitP(vec3 p){p.y+=.03;p.xz/=.68+.32*smoothstep(-.5,.1,p.y);return p;}
+float pit(vec3 p){
+  vec3 q=pitP(p);float x=abs(q.x),k=max(0.,1.-x*x*180.),g=max(0.,1.-(x-.07)*(x-.07)*450.);
+  return (ell(q,vec3(.25,.5,.36))+.009*sin(q.y*24.+q.z*9.)*sin(q.z*21.+q.x*19.)-.02*k*k+.012*g*g*step(0.,q.z))*.75;
+}
+// Its furrows: narrow grooves that wander wherever two noises cross their middle, running mostly lengthwise. 1 in a groove.
+float furrow(vec3 p){
+  vec3 q=pitP(p);float a=vn(q*vec3(11.,7.,11.)+S)-.5,b=vn(M*q*17.+S)-.5;
+  return DET*max(exp(-a*a*160.),.8*exp(-b*b*130.));
+}
+// x: distance, y: what it is (0 skin, 1 stem, 2 leaf, 3 cut flesh, 4 pit)
+vec2 map(vec3 p){
+  vec2 r=vec2(1e3,0.);float h;
+  if(NB<MAXB){ // the last bite leaves only the pit
+    float d=body(p),c=bites(p,d);
+    r=c>d?vec2(c,3.):vec2(d,0.);
+    if(ST>.5&&.68-p.y<r.x){ // stem and leaf: gone with a bite that takes the top of the fruit, and never any lower than y=.68
+      c=stem(p,h);if(c<r.x)r=vec2(c,1.);
+      vec3 q=leafP(p);c=length(q)-.41; // leaf and pit are only worked out once the ray is inside a sphere around them
+      if(c<r.x){if(c<.05)c=leaf(q);if(c<r.x)r=vec2(c,2.);}
+    }
+  }
+  float k=length(p)-.57;
+  if(k<r.x){if(k<.05)k=pit(p);if(k<r.x)r=vec2(k,4.);}
   return r;
 }
-vec3 nor(vec3 p){vec2 e=vec2(.002,0.);return normalize(vec3(map(p+e.xyy).x-map(p-e.xyy).x,map(p+e.yxy).x-map(p-e.yxy).x,map(p+e.yyx).x-map(p-e.yyx).x));}
+vec3 tet(int i){return i==0?vec3(1.,-1.,-1.):i==1?vec3(-1.,-1.,1.):i==2?vec3(-1.,1.,-1.):vec3(1.);}
+vec3 nor(vec3 p,float e){vec3 n=vec3(0.);for(int i=0;i<4;i++){vec3 k=tet(i);n+=k*map(p+k*e).x;}return normalize(n);}
+#ifndef LITE
+// How much light reaches p: the leaf shades the shoulder, one wall of a bite shades the other.
+float shadow(vec3 p,vec3 l){
+  float s=1.,t=.015;
+  for(int i=0;i<12;i++){float h=map(p+l*t).x;s=min(s,9.*h/t);t+=clamp(h,.02,.25);if(s<.02||t>1.3)break;}
+  return smoothstep(0.,1.,s);
+}
+float ao(vec3 p,vec3 n){float o=0.,w=1.;for(int i=1;i<4;i++){float h=.045*float(i);o+=(h-map(p+n*h).x)*w;w*=.6;}return clamp(1.-3.2*o,0.,1.);}
+#endif
+
+// x: bruising, y: scar tissue. w: any noise the caller has to hand, to roughen the one and break up the other.
+vec2 blem(vec3 p,float w){
+  vec3 n=normalize(p),c=Z[2].xyz,t=normalize(cross(c,vec3(.3,1.,.2))),v=n-c;
+  float b=0.,al=dot(v,t),ac=dot(v,cross(c,t))-.015*sin(al*20.+S.x);
+  for(int i=0;i<2;i++)b=max(b,1.-smoothstep(0.,1.,(length(n-Z[i].xyz)+(w-.5)*.15)/Z[i].w));
+  return vec2(b*b,(1.-smoothstep(.002,.006,abs(ac)))*(1.-smoothstep(.3,1.,abs(al)/Z[2].w))*smoothstep(.36,.46,w));
+}
+// Skin colour (a: how blushed). fz: how much fuzz is left standing.
+vec4 skinC(vec3 p,float px,out float fz){
+  float gr=groove(p),cv=cavity(p),big=fbm(p*1.5+S),rub=vn(p*2.6+S+40.),
+    st=vn(p*vec3(13.,1.5,13.)+S),                     // streaks running stem to tip
+    sp=mix(.5,vn(p*60.+S),fade(60.,px));
+  float t=smoothstep(-1.2,1.,-p.y*.9+p.x*.6+.1+(big-.5)*2.2+(st-.5)*1.1); // how much sun this spot saw
+  float cov=smoothstep(.46,.62,t+(sp-.5)*.55);         // blush goes down as stipple: solid where dense, speckled at its edge
+  vec3 c=mix(mix(mix(vec3(1.,.85,.43),vec3(.93,.87,.45),smoothstep(.4,.55,rub)),vec3(1.,.70,.30),smoothstep(.2,.6,t)), // ground colour: yellow, still greenish in places, warming toward the blush
+    mix(vec3(.95,.40,.27),vec3(.79,.15,.19),smoothstep(.45,.9,t+(st-.5)*.6+(big-.5)*.5)),cov*(.6+.4*smoothstep(.4,.7,t)));          // blush: orange-red, crimson at its deepest
+  c=mix(c,vec3(1.,.95,.6),.3*smoothstep(.2,1.,p.y));   // paler toward the stem, greener down in its dimple
+  c=mix(c,vec3(.80,.82,.38),.5*cv);
+  c*=mix(vec3(1.),vec3(.66,.5,.5),gr);                 // the crease runs darker and redder
+  c=mix(c,vec3(1.,.84,.55),.4*cov*dots(p*38.+S,.9*big-.15)*fade(90.,px)); // lenticels: pale dots in the blush, thicker in some parts than others
+  c=mix(c,vec3(.42,.24,.12),.5*dots(p*47.+S+9.,.1)*fade(120.,px));        // freckles
+  vec2 bl=blem(p,st);
+  c=mix(c,c*vec3(.72,.55,.4)+vec3(.05,.03,0.),.8*bl.x*(.7+.6*sp)); // bruise: browned, unevenly
+  c=mix(c,vec3(.55,.38,.22),.75*bl.y);                             // scar: a corky scratch
+  fz=(1.-.6*smoothstep(.58,.68,rub))*(1.-bl.y)*(1.-.5*cv);         // rubbed thin in patches
+  return vec4(c,cov);
+}
+// A cut surface, coloured by what lies at that depth. dep: how far under the skin, ds: how far from the pit, sk: the skin above.
+vec3 fleshC(vec3 p,float dep,float ds,float px,vec4 sk){
+  vec3 dir=normalize(p);float r=length(p),w=max(px,.003),
+    fb=mix(.5,vn(dir*34.+r*1.3+S),fade(34.,px)),fine=mix(.5,vn(dir*80.+r*2.+S),fade(80.,px)); // fibres are strung from pit to skin
+  vec3 c=mix(mix(vec3(1.,.70,.25),vec3(1.,.81,.36),smoothstep(.05,.3,ds)),vec3(1.,.93,.66),1.-smoothstep(TH,.085,dep))*(.93+.14*fb); // pale just under the skin, golden further in
+  c=mix(c,vec3(1.,.93,.7),.3*smoothstep(.62,.75,fine));                               // vascular strands
+  c=mix(c,vec3(.95,.42,.3),.55*sk.a*(1.-smoothstep(TH,TH+.035+.05*fb,dep)));          // blush seeps a little way in from the skin
+  c=mix(c,vec3(.80,.17,.15),.9*(1.-smoothstep(0.,.22,ds+(fb-.5)*.16)));               // and the pit stains outward along the fibres
+  c=mix(c,vec3(.95,.86,.62),.7*(1.-smoothstep(.012,.035,length(p.xz)))*smoothstep(.4,.5,p.y)); // the cord of vessels running from stem to pit
+  c*=1.-.22*exp(-p.x*p.x*2500.)*step(0.,p.z);                                         // the crease carries on inward as a faint seam
+  c*=.4+.6*smoothstep(-.005,.03,ds);                                                  // the dark of the socket the pit sits in
+  return mix(sk.rgb*vec3(.8,.7,.7),c,smoothstep(TH-w,TH+w,dep))*(1.-.3*exp(-(dep-TH)*(dep-TH)/(w*w))); // the skin in section, and the line under it
+}
+// Relief too fine for map(): dimpled skin, bark, leaf veins, glistening flesh, the furrows of the pit.
+float hgt(vec3 p,float id,float px){
+  if(id<.5)return .004*vn(p*7.+S)-.006*blem(p,.5).x;
+  if(id<1.5)return .004*vn(p*vec3(70.,9.,70.));
+  if(id<2.5){vec3 q=leafP(p);float y=abs(q.y);return -.004*exp(-y*y*9000.)-.0015*pow(.5+.5*sin((q.x-y*1.1)*105.),6.)*smoothstep(0.,.03,y);}
+  if(id<3.5)return .003*vn(p*60.+S)*fade(60.,px)+.003*vn(normalize(p)*34.+length(p)*1.3+S)*fade(34.,px);
+  return -.02*furrow(p)*fade(40.,px);
+}
+vec3 bump(vec3 p,vec3 n,float id,float px){
+  vec3 g=vec3(0.);float e=max(px,.002);
+  for(int i=0;i<4;i++){vec3 k=tet(i);g+=k*hgt(p+k*e,id,px);}
+  g/=4.*e;return normalize(n-g+n*dot(g,n));
+}
+vec2 sph(vec3 o,vec3 d,float r2){float b=dot(o,d),h=b*b-dot(o,o)+r2;return h<0.?vec2(1e3,-1e3):vec2(-b-sqrt(h),-b+sqrt(h));} // where a ray enters and leaves a sphere
 void main(){
   vec2 uv=(2.*gl_FragCoord.xy-R)/R.y;
-  vec3 rdc=normalize(vec3(uv,-2.6)),ro=vec3(0.,.1,3.6),rd=rdc;
-  ro.yz=rot(A.y)*ro.yz;rd.yz=rot(A.y)*rd.yz;ro.xz=rot(A.x)*ro.xz;rd.xz=rot(A.x)*rd.xz;
-  float b=dot(ro,rd),h=b*b-dot(ro,ro)+2.6;
-  if(h<0.){gl_FragColor=vec4(0.);return;}
-  float t=-b-sqrt(h),tend=-b+sqrt(h),tm=t,md=1e3;vec2 m=vec2(0.);
-  for(int i=0;i<72;i++){m=map(ro+rd*t);if(m.x<md){md=m.x;tm=t;}if(m.x<.0015||t>tend)break;t+=m.x*.85;}
-  bool hit=m.x<.0015;
-  float a=hit?1.:1.-smoothstep(0.,3./R.y,md);
+  vec3 ro=vec3(0.,.1,3.6),rd=normalize(vec3(uv,-2.6)),L=normalize(vec3(-.6,.7,.8)),up=vec3(0.,1.,0.);
+  // everything from here happens in the peach's own frame, so camera, light and sky are turned into it
+  ro.yz=rot(A.y)*ro.yz;rd.yz=rot(A.y)*rd.yz;L.yz=rot(A.y)*L.yz;up.yz=rot(A.y)*up.yz;
+  ro.xz=rot(A.x)*ro.xz;rd.xz=rot(A.x)*rd.xz;L.xz=rot(A.x)*L.xz;up.xz=rot(A.x)*up.xz;
+  // two spheres hold everything: one round the fruit (or round the pit, once that is all there is), one round the leaf and the top of the stem
+  vec2 s1=sph(ro,rd,NB<MAXB?1.37:.36),s2=NB<MAXB&&ST>.5?sph(ro-vec3(.36,1.08,.06),rd,.2):vec2(1e3,-1e3);
+  float px=2.8/R.y,t=min(s1.x,s2.x),tend=max(s1.y,s2.y),tm=t,md=1e3,id=0.; // px: a pixel's width on the peach
+  if(t>tend){gl_FragColor=vec4(0.);return;}
+  bool hit=true; // a ray that runs out of steps is skimming a surface, and counts as having reached it
+  for(int i=0;i<100;i++){vec2 m=map(ro+rd*t);if(m.x<md){md=m.x;tm=t;id=m.y;}if(m.x<.45*px)break;t+=m.x*.85;if(t>tend){hit=false;break;}}
+  float halo=hit||id>.5?0.:1.-clamp(md/.016,0.,1.); // fuzz stands a little off the skin and softens its outline
+  float a=max(hit?1.:1.-smoothstep(0.,1.07*px,md),.3*halo*halo);
   if(a<=0.){gl_FragColor=vec4(0.);return;}
-  vec3 p=ro+rd*(hit?t:tm),n=nor(p);float id=map(p).y;
-  n.xz=rot(-A.x)*n.xz;n.yz=rot(-A.y)*n.yz;
-  vec3 L=normalize(vec3(-.6,.7,.8)),col;
+  vec3 p=ro+rd*(hit?t:tm),g=nor(p,max(.5*px,.0008)),col;
+  float spe=.3,shn=18.,fz=0.,sub=0.,wet=0.; // highlight strength and tightness, fuzz, how much light passes through, juice
   if(id<.5){
-    col=mix(vec3(1.,.82,.40),vec3(.96,.36,.44),smoothstep(-1.2,1.,-p.y*.9+p.x*.6+.1));
-    col=mix(col,vec3(1.,.95,.6),.35*smoothstep(.2,1.,p.y));
-    col*=1.-.4*groove(p);
-  }else if(id<1.5)col=vec3(.42,.27,.14);
-  else if(id<2.5)col=vec3(.36,.68,.26);
-  else if(id<3.5)col=mix(vec3(.95,.45,.3),vec3(1.,.82,.4),smoothstep(.45,.7,length(p)))*(.45+.55*smoothstep(.6,1.05,length(p))); // flesh: redder and darker the deeper the bite goes
-  else col=vec3(.5,.28,.14);
-  float dif=clamp(dot(n,L),0.,1.);
-  float spe=pow(clamp(dot(n,normalize(L-rdc)),0.,1.),id<.5?18.:id>3.5?8.:id>2.5?24.:60.)*(id<.5?.3:id>2.5?.12:.5);
-  float rim=pow(1.-clamp(dot(n,-rdc),0.,1.),3.);
-  col=col*(.4+.7*dif)+spe+rim*vec3(.3,.22,.2);
+    vec4 k=skinC(p,px,fz);wet=smoothstep(-.09,-.012,bites(p,0.)); // juice runs over the edge of a bite and mats the fuzz
+    col=k.rgb*(1.-.18*wet);fz*=1.-wet;spe=mix(.34-.26*fz,.4,wet);shn=mix(14.,70.,wet);sub=.1;wet*=.4;
+  }else if(id<1.5){
+    float hh;stem(p,hh);vec3 pa=p-vec3(.04,1.2,0.);
+    col=mix(vec3(.30,.19,.10),vec3(.50,.34,.18),vn(p*vec3(50.,7.,50.)+S));
+    col=mix(col,vec3(.78,.66,.42)*(.75+.25*cos(length(pa.xz)*260.)),smoothstep(.985,.995,hh)*step(.9,g.y)); // the cut end, rings and all
+    spe=.2;shn=20.;
+  }else if(id<2.5){
+    vec3 q=leafP(p);float u=clamp(q.x/.72+.5,0.,1.),y=abs(q.y),e=y/(leafW(u)+.001);
+    float ve=max(exp(-y*y*9000.),pow(.5+.5*sin((q.x-y*1.1)*105.),6.)*(1.-e*e)*smoothstep(0.,.03,y));
+    col=mix(vec3(.20,.50,.16),vec3(.42,.70,.22),.35+.5*vn(p*9.+S)-.3*u)*(g.z>0.?1.:.8);
+    col=mix(col,vec3(.66,.82,.36),.6*ve);
+    col=mix(col,vec3(.62,.52,.2),smoothstep(.75,1.,e)*smoothstep(.55,.9,vn(p*14.+S))+smoothstep(.9,1.,u)); // margins and tip gone dry
+    spe=.35;shn=30.;sub=.7;
+  }else if(id<3.5){
+    float d=-body(p),ds=pit(p)/.75,k=smoothstep(TH,TH*2.,d);vec4 sk=vec4(0.);
+    if(d<.12)sk=skinC(p,px,fz); // the skin only shows this close to it
+    col=fleshC(p,d,ds,px,sk);fz=0.;
+    spe=mix(.25,.7,k);shn=mix(30.,150.,k);sub=.9;wet=k;
+  }else{
+    float f=furrow(p)*fade(40.,px);
+    col=mix(vec3(.72,.51,.33),vec3(.52,.32,.19),fbm(p*6.+S))*(1.-.72*f);
+    col=mix(col,vec3(.70,.22,.14),.5*f*smoothstep(.4,.6,vn(p*5.+S+3.))); // flesh still clinging in some of the furrows
+    spe=.1;shn=10.;
+  }
+  vec3 n=bump(p,g,id,px);
+  float ndl=dot(n,L),dif=clamp(ndl,0.,1.),ndv=clamp(-dot(n,rd),0.,1.),sh=1.,occ=1.,thin=dif;
+#ifndef LITE
+  if(hit){occ=ao(p,g);sh=dot(g,L)>0.?shadow(p+g*.004,L):0.;if(sub>0.)thin=smoothstep(-.07,.05,map(p+L*.11).x);}
+#endif
+  occ=mix(occ,1.,.45*sub); // flesh and leaf pass light around inside themselves, so their hollows never go fully dark
+  vec3 lit=vec3(1.,.96,.9)*.72*dif*sh+mix(vec3(.36,.28,.26),vec3(.44,.42,.46),.5+.5*dot(n,up))*(.35+.65*occ);
+  lit+=(1.-occ)*vec3(.5,.27,.11)*(id>3.5?.9:.3); // what the flesh around a hollow throws back into it
+  col=col*(lit+sub*vec3(1.,.62,.3)*(.12+.3*thin*(1.-dif*sh)))
+    +wet*(.16*smoothstep(.3,.95,dot(reflect(rd,n),up))+.25*pow(1.-ndv,4.))*(.4+.6*occ) // wet flesh mirrors the sky
+    +pow(clamp(dot(n,normalize(L-rd)),0.,1.),shn)*spe*sh
+    +pow(1.-ndv,3.)*vec3(.3,.22,.2)*occ
+    +fz*vec3(.95,.85,.75)*(.07+.33*pow(1.-ndv,2.5))*(.3+.7*clamp(ndl*.5+.5,0.,1.))*occ; // fuzz: a pale haze, brightest edge-on
+  col=mix(col,mix(col,vec3(1.,.93,.84),.5)*(.4+.6*clamp(ndl*.5+.5,0.,1.)),halo);
   gl_FragColor=vec4(col*a,a);
 }`;
-let gl = null, uR, uT, uA, uB, uNB;
+// Compiled without waiting for it: a shader this size can take a driver seconds, and the page should not freeze meanwhile.
+// If it will not build, a LITE build is tried (see the shader) before giving up on the peach.
+let gl = null, ready = false, lite = false, pr, kpc, loc;
+let timed = 0, best = Infinity, cost = 0; // frames timed so far, the fastest of them, and from that the milliseconds one pixel of peach takes this GPU
+function build() {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 v;void main(){gl_Position=vec4(v,0.,1.);}'));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, (lite ? '#define LITE\n' : '') + FS));
+  gl.bindAttribLocation(pr, 0, 'v'); gl.linkProgram(pr);
+}
+function noPeach() { // landscape + text still work
+  gl = null; peach.hidden = true; trivia.textContent = triviaText;
+  const c = document.querySelector('.s p'); if (c) c.textContent = 'Scroll on.';
+}
+function linked() { // asked every frame until the peach can be drawn
+  if (kpc && !gl.getProgramParameter(pr, kpc.COMPLETION_STATUS_KHR)) return false;
+  if (gl.getProgramParameter(pr, gl.LINK_STATUS)) {
+    gl.useProgram(pr); loc = Object.fromEntries(['R', 'A', 'B', 'U', 'Z', 'S', 'NB', 'ST'].map(n => [n, gl.getUniformLocation(pr, n)]));
+    peach.style.opacity = ''; return ready = true;
+  }
+  console.error(gl.getProgramInfoLog(pr), ...(gl.getAttachedShaders(pr) || []).map(s => gl.getShaderInfoLog(s)));
+  if (lite) noPeach(); else { lite = true; build(); }
+  return false;
+}
 try {
   gl = peach.getContext('webgl', { antialias: false });
-  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
-  const pr = gl.createProgram();
-  gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 v;void main(){gl_Position=vec4(v,0.,1.);}'));
-  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
+  kpc = gl.getExtension('KHR_parallel_shader_compile');
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-  const v = gl.getAttribLocation(pr, 'v'); gl.enableVertexAttribArray(v); gl.vertexAttribPointer(v, 2, gl.FLOAT, false, 0, 0);
-  uR = gl.getUniformLocation(pr, 'R'); uT = gl.getUniformLocation(pr, 'T'); uA = gl.getUniformLocation(pr, 'A'); uB = gl.getUniformLocation(pr, 'B'); uNB = gl.getUniformLocation(pr, 'NB');
-} catch (e) { console.error(e); gl = null; peach.hidden = true; } // no WebGL: landscape + text still work
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  build(); peach.style.opacity = 0; // fades in once built
+} catch (e) { console.error(e); gl = null; peach.hidden = true; } // no WebGL
+
+// Every peach is its own: a seed picks its blush, speckle, bruises and scar, and is remembered like the bites are.
+const S = new Float32Array(3), Z = new Float32Array(12);
+let seed = 0;
+function grow(s) {
+  seed = s; const r = i => hash(seed * 1.618 + i * 7.31);
+  S.set([r(1) * 40, r(2) * 40, r(3) * 40]);
+  for (let i = 0; i < 3; i++) { // two bruises and a scar: where on the fruit, and how big
+    const v = [r(4 + i * 4) * 2 - 1, r(5 + i * 4) * 1.3 - .8, r(6 + i * 4) * 2 - 1], l = Math.hypot(...v) || 1;
+    Z.set([v[0] / l, v[1] / l, v[2] / l, i < 2 ? .1 + .1 * r(7 + i * 4) : .07 + .08 * r(7 + i * 4)], i * 4);
+  }
+  try { localStorage.setItem('seed', seed); } catch (e) {}
+}
+try { seed = +localStorage.getItem('seed'); } catch (e) {}
+grow(seed > 0 && Number.isFinite(seed) ? seed : 1); // the first peach is the same for everyone
 
 // Bites: tap the peach to take one. Centres live in peach space and are remembered, so the peach stays bitten on the next visit.
-const MAXB = +FS.match(/#define MAXB (\d+)/)[1], bitesArr = new Float32Array(3 * MAXB);
-let bites = [], A = [0, 0]; // A: camera angles of the last drawn frame
+const MAXB = +FS.match(/#define MAXB (\d+)/)[1], bitesArr = new Float32Array(4 * MAXB), jawArr = new Float32Array(4 * MAXB);
+let bites = [], stem = 1, A = [0, 0]; // stem: whether it is still attached. A: camera angles of the last drawn frame
 try { bites = JSON.parse(localStorage.getItem('bites')) || []; } catch (e) {}
 if (!Array.isArray(bites) || !bites.every(b => Array.isArray(b) && b.length == 3 && b.every(Number.isFinite))) bites = []; // garbage in storage
 bites = bites.slice(0, MAXB);
 function saveBites() {
-  bitesArr.fill(0); bitesArr.set(bites.flat());
+  bitesArr.fill(0); jawArr.fill(0);
+  bites.forEach((b, i) => { // what the shader shapes each bite with: a random number of its own, and which way the jaw lay across it
+    const l = Math.hypot(...b) || 1, n = b.map(v => v / l), k = hash(b[0] * 3.1 + b[1] * 5.7 + b[2] * 9.3), a = (k - .5) * .9;
+    let u = Math.abs(n[1]) > .95 ? [0, -n[2], n[1]] : [n[2], 0, -n[0]]; // level, unless the bite went into the very top or bottom
+    const ul = Math.hypot(...u) || 1, w = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
+    bitesArr.set([...b, k], i * 4); jawArr.set([...u.map((v, j) => (v * Math.cos(a) + w[j] * Math.sin(a)) / ul), 1 / l], i * 4); // then tilted a little, as heads are
+  });
+  stem = +bites.every(b => Math.hypot(b[0], b[1] - .87, b[2]) > .4); // it stands at (0, .87, 0), and goes with a bite that takes the ground from under it
+  timed = 0; best = Infinity; // a bitten peach costs more to draw than a whole one: time it again
   try { localStorage.setItem('bites', JSON.stringify(bites)); } catch (e) {}
   trivia.textContent = gl && bites.length >= MAXB ? 'All gone. Tap the pit for another.' : triviaText;
 }
 saveBites();
 const rot2 = (x, y, a) => [Math.cos(a) * x + Math.sin(a) * y, Math.cos(a) * y - Math.sin(a) * x]; // same rot() as the shader
 peach.addEventListener('click', e => {
-  if (!gl) return;
-  if (bites.length >= MAXB) { bites = []; saveBites(); return; } // tapping the pit grows a fresh peach
+  if (!ready) return;
+  if (bites.length >= MAXB) { bites = []; grow(1 + Math.floor(Math.random() * 1e6)); saveBites(); return; } // tapping the pit grows a fresh peach
   // the tap as a ray in peach space, through the shader's camera; a sphere of radius 1.05 stands in for the peach
   const r = peach.getBoundingClientRect(), ux = (e.clientX - r.left) / r.width * 2 - 1, uy = 1 - (e.clientY - r.top) / r.height * 2, len = Math.hypot(ux, uy, 2.6);
   const ro = [0, .1, 3.6], rd = [ux / len, uy / len, -2.6 / len];
   [ro[1], ro[2]] = rot2(ro[1], ro[2], A[1]); [rd[1], rd[2]] = rot2(rd[1], rd[2], A[1]);
   [ro[0], ro[2]] = rot2(ro[0], ro[2], A[0]); [rd[0], rd[2]] = rot2(rd[0], rd[2], A[0]);
-  const b = ro[0] * rd[0] + ro[1] * rd[1] + ro[2] * rd[2], h = b * b - (ro[0] ** 2 + ro[1] ** 2 + ro[2] ** 2) + 1.1;
-  if (h < 0) return; // missed the peach
-  const t = -b - Math.sqrt(h), depth = 1.12 - .05 * bites.length; // each bite goes a little deeper, the last ones reach the pit
-  bites.push(ro.map((o, i) => +((o + rd[i] * t) * depth).toFixed(3)));
+  const span = (c, r, k = [1, 1, 1]) => { // where the ray enters and leaves a sphere at c, or an ellipsoid if k squashes it
+    const o = ro.map((v, i) => (v - c[i]) / k[i]), d = rd.map((v, i) => v / k[i]), dd = d[0] ** 2 + d[1] ** 2 + d[2] ** 2, od = o[0] * d[0] + o[1] * d[1] + o[2] * d[2];
+    const h = od * od - dd * (o[0] ** 2 + o[1] ** 2 + o[2] ** 2 - r * r);
+    return h < 0 ? null : [(-od - Math.sqrt(h)) / dd, (-od + Math.sqrt(h)) / dd];
+  };
+  const whole = span([0, 0, 0], 1.05), pit = span([0, -.03, 0], 1, [.25, .5, .36]);
+  if (!whole) return; // missed the peach
+  let t = whole[0];
+  for (let i = 0; i < bites.length; i++) { const s = span(bites[i], .42); if (s && s[0] <= t && t < s[1]) { t = s[1]; i = -1; } } // an earlier bite was here first: go on to its far wall
+  if (pit && pit[0] < t) t = pit[0]; // teeth stop at the pit
+  if (t > whole[1]) return; // nothing left there to bite
+  // a bite takes a sphere centred just above what the teeth met, so going back to the same place digs down to the pit
+  const at = ro.map((o, i) => o + rd[i] * t), l = Math.hypot(...at) || 1;
+  bites.push(at.map(v => +(v * (1 + .126 / l)).toFixed(3)));
   saveBites(); navigator.vibrate?.(15);
 });
 
+const pixel = new Uint8Array(4);
+function paint() { gl.viewport(0, 0, peach.width, peach.height); gl.uniform2f(loc.R, peach.width, peach.height); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function frame(ms) {
   const t = ms / 1000, e = still ? 1 : .08;
   pc += (p - pc) * e; pxc += (px - pxc) * e; pyc += (py - pyc) * e;
   draw(t);
-  if (gl) {
-    gl.viewport(0, 0, peach.width, peach.height);
-    gl.uniform2f(uR, peach.width, peach.height); gl.uniform1f(uT, t);
+  if (gl && (ready || linked())) {
     A = [pc * Math.PI + pxc * .4 + (still ? 0 : t * .25), -pyc * .25]; // half a turn per scene
-    gl.uniform2f(uA, A[0], A[1]); gl.uniform3fv(uB, bitesArr); gl.uniform1i(uNB, bites.length);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.uniform2f(loc.A, A[0], A[1]); gl.uniform4fv(loc.B, bitesArr); gl.uniform4fv(loc.U, jawArr); gl.uniform4fv(loc.Z, Z); gl.uniform3fv(loc.S, S); gl.uniform1i(loc.NB, bites.length); gl.uniform1f(loc.ST, stem);
+    const t0 = performance.now();
+    paint();
+    if (timed < 3) { // three frames are timed, and the fastest counts (the very first also pays for driver warm-up)
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); const t1 = performance.now(); // this one waits for the GPU to finish the frame
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);                              // this one for nothing, so it shows what the asking costs
+      best = Math.min(best, Math.max(0, 2 * t1 - t0 - performance.now()));
+      if (++timed == 3) { cost = best / (peach.width * peach.height); if (fit()) paint(); } // resizing a canvas clears it
+    }
   }
   requestAnimationFrame(frame);
 }
 const onScroll = () => p = scrollY / Math.max(1, document.documentElement.scrollHeight - innerHeight) * (N - 1);
+let dpr = 1;
+function fit() { // sizes the peach canvas, and says whether that changed it
+  // a peach that would take this GPU more than 8 ms a frame is rendered with fewer pixels, enough to take 6, and stretched back to size by CSS
+  const r = peach.getBoundingClientRect(), est = cost * r.width * r.height * dpr * dpr, q = est > 8 ? Math.max(.4, Math.sqrt(6 / est)) : 1;
+  const w = Math.round(r.width * dpr * q), h = Math.round(r.height * dpr * q), changed = peach.width != w || peach.height != h;
+  if (changed) { peach.width = w; peach.height = h; }
+  return changed;
+}
 function resize() {
-  const dpr = Math.min(devicePixelRatio || 1, coarse ? 1.5 : 2);
+  dpr = Math.min(devicePixelRatio || 1, coarse ? 1.5 : 2);
   W = innerWidth; H = innerHeight; SX = Math.max(W, H);
   land.width = Math.round(W * dpr); land.height = Math.round(H * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const r = peach.getBoundingClientRect(); peach.width = Math.round(r.width * dpr); peach.height = Math.round(r.height * dpr);
-  onScroll();
+  fit(); onScroll();
 }
 addEventListener('scroll', onScroll, { passive: true });
 addEventListener('resize', resize);
