@@ -158,7 +158,7 @@ precision mediump float;
 #endif
 // R: canvas size. A: camera angles. B[i]: a bite's centre, and a random number of its own. U[i]: the jaw's axis across that bite, and 1/|centre|.
 // The first MAXB-1 are the visitor's bites, the rest the feast the last one sets off. NB: how many are taken. GONE: 1 once only the pit is left.
-// S: this peach's noise offset. Z[0], Z[1]: bruises, Z[2]: a scar (where on the fruit, how big). ST: 1 while the stem still has something to hold on to.
+// S: this peach's noise offset. Z[0], Z[1]: bruises, Z[2]: a scar (where on the fruit, how big). ST: 1 while the stem still has something to hold on to, 0 once it has not, 2 to draw stem and leaf with nothing else (for when they fall).
 #define MAXB 7   // bites it takes to finish a peach
 #define FEAST 12 // bites in the feast
 uniform vec2 R,A;uniform vec4 B[MAXB-1+FEAST],U[MAXB-1+FEAST],Z[3];uniform vec3 S;uniform int NB;uniform float ST,GONE;
@@ -242,18 +242,18 @@ float furrow(vec3 p){
 }
 // x: distance, y: what it is (0 skin, 1 stem, 2 leaf, 3 cut flesh, 4 pit)
 vec2 map(vec3 p){
-  vec2 r=vec2(1e3,0.);float h;
+  vec2 r=vec2(1e3,0.);float h,c;
   if(GONE<.5){ // in the end only the pit is left
-    float d=body(p),c=bites(p,d);
-    r=c>d?vec2(c,3.):vec2(d,0.);
+    if(ST<1.5){float d=body(p);c=bites(p,d);r=c>d?vec2(c,3.):vec2(d,0.);}
     if(ST>.5&&.68-p.y<r.x){ // stem and leaf: gone with a bite that takes the top of the fruit, and never any lower than y=.68
-      c=stem(p,h);if(c<r.x)r=vec2(c,1.);
+      c=stem(p,h);if(ST>1.5)c=max(c,.85-p.y); // on its own, the stem ends where it broke off at the skin
+      if(c<r.x)r=vec2(c,1.);
       vec3 q=leafP(p);c=length(q)-.41; // leaf and pit are only worked out once the ray is inside a sphere around them
       if(c<r.x){if(c<.05)c=leaf(q);if(c<r.x)r=vec2(c,2.);}
     }
   }
   float k=length(p)-.57;
-  if(k<r.x){if(k<.05)k=pit(p);if(k<r.x)r=vec2(k,4.);}
+  if(ST<1.5&&k<r.x){if(k<.05)k=pit(p);if(k<r.x)r=vec2(k,4.);}
   return r;
 }
 vec3 tet(int i){return i==0?vec3(1.,-1.,-1.):i==1?vec3(-1.,-1.,1.):i==2?vec3(-1.,1.,-1.):vec3(1.);}
@@ -328,8 +328,8 @@ void main(){
   // everything from here happens in the peach's own frame, so camera, light and sky are turned into it
   ro.yz=rot(A.y)*ro.yz;rd.yz=rot(A.y)*rd.yz;L.yz=rot(A.y)*L.yz;up.yz=rot(A.y)*up.yz;
   ro.xz=rot(A.x)*ro.xz;rd.xz=rot(A.x)*rd.xz;L.xz=rot(A.x)*L.xz;up.xz=rot(A.x)*up.xz;
-  // two spheres hold everything: one round the fruit (or round the pit, once that is all there is), one round the leaf and the top of the stem
-  vec2 s1=sph(ro,rd,GONE<.5?1.37:.36),s2=GONE<.5&&ST>.5?sph(ro-vec3(.36,1.08,.06),rd,.2):vec2(1e3,-1e3);
+  // two spheres hold everything: one round the fruit (or round the pit, once that is all there is), one round stem and leaf
+  vec2 s1=ST<1.5?sph(ro,rd,GONE<.5?1.37:.36):vec2(1e3,-1e3),s2=GONE<.5&&ST>.5?sph(ro-vec3(.2,1.,.03),rd,.4):vec2(1e3,-1e3);
   float px=2.8/R.y,t=min(s1.x,s2.x),tend=max(s1.y,s2.y),tm=t,md=1e3,id=0.; // px: a pixel's width on the peach
   if(t>tend){gl_FragColor=vec4(0.);return;}
   bool hit=true; // a ray that runs out of steps is skimming a surface, and counts as having reached it
@@ -435,6 +435,7 @@ const MAXB = +FS.match(/#define MAXB (\d+)/)[1], FEAST = +FS.match(/#define FEAS
 const bitesArr = new Float32Array(4 * (MAXB - 1 + FEAST)), jawArr = new Float32Array(bitesArr.length); // the visitor's bites, then the feast's
 let bites = [], stem = 1, A = [0, 0]; // stem: whether it is still attached. A: camera angles of the last drawn frame
 let feast = 0, taken = 0, stemTill = 0; // feast: when it began, 0 if none is under way. taken: how many of its bites so far. stemTill: how many of them the stem outlasts
+let stood = 0; // whether the stem was still on the peach in the last frame drawn
 try { bites = JSON.parse(localStorage.getItem('bites')) || []; } catch (e) {}
 if (!Array.isArray(bites) || !bites.every(b => Array.isArray(b) && b.length == 3 && b.every(Number.isFinite))) bites = []; // garbage in storage
 bites = bites.slice(0, MAXB);
@@ -492,6 +493,22 @@ peach.addEventListener('click', e => {
   if (bites.length >= MAXB && !still) feastOn(at, ro); else navigator.vibrate?.(15); // with reduced motion the peach is simply gone
 });
 
+const see = P => { // where a point of the peach shows on its canvas, as fractions of its width and height: the shader's camera, the other way round
+  let [x, y, z] = P; [x, z] = rot2(x, z, -A[0]); [y, z] = rot2(y, z, -A[1]);
+  const k = 1.3 / (3.6 - z); return [.5 + x * k, .5 - (y - .1) * k];
+};
+// Stem and leaf fall: one frame of them alone goes to a canvas of its own, laid exactly over the peach, and that topples off the bottom of the screen.
+function drop() {
+  gl.uniform1f(loc.ST, 2); paint();
+  const r = peach.getBoundingClientRect(), box = document.body.appendChild(document.createElement('div')), c = box.appendChild(document.createElement('canvas'));
+  c.width = peach.width; c.height = peach.height; c.getContext('2d').drawImage(peach, 0, 0);
+  const [ox, oy] = see([.2, 1, .03]), side = Math.sign(see([.65, 1.26, 0])[0] - see([0, .87, 0])[0]) || 1, T = 1100; // it turns about its own middle, and goes the way the leaf leans
+  box.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;pointer-events:none`;
+  c.style.cssText = `display:block;width:${r.width}px;height:${r.height}px;transform-origin:${ox * 100}% ${oy * 100}%`;
+  // a small hop as it comes loose, then gravity; all the while it drifts sideways and turns at a steady rate
+  box.animate([{ transform: 'none', easing: 'ease-out' }, { transform: `translateY(${-r.height * .05}px)`, offset: .15, easing: 'cubic-bezier(.55,.085,.68,.53)' }, { transform: `translateY(${innerHeight - r.top + r.height * .3}px)` }], { duration: T, fill: 'forwards' }).onfinish = () => box.remove();
+  c.animate([{ transform: 'none' }, { transform: `translateX(${side * r.width * .45}px) rotate(${side * 200}deg)` }], { duration: T, fill: 'forwards' });
+}
 const pixel = new Uint8Array(4);
 function paint() { gl.viewport(0, 0, peach.width, peach.height); gl.uniform2f(loc.R, peach.width, peach.height); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function frame(ms) {
@@ -506,7 +523,10 @@ function frame(ms) {
       else if (k > taken) { taken = k; peach.animate?.([{ transform: 'scale(.96)' }, { transform: 'none' }], BEAT); } // each one jolts the fruit
     }
     gl.uniform2f(loc.A, A[0], A[1]); gl.uniform4fv(loc.B, bitesArr); gl.uniform4fv(loc.U, jawArr); gl.uniform4fv(loc.Z, Z); gl.uniform3fv(loc.S, S);
-    gl.uniform1i(loc.NB, Math.min(bites.length, MAXB - 1) + (feast && taken)); gl.uniform1f(loc.ST, feast ? stem && taken <= stemTill : stem); gl.uniform1f(loc.GONE, !feast && bites.length >= MAXB);
+    const gone = !feast && bites.length >= MAXB, st = +(feast ? stem && taken <= stemTill : stem);
+    gl.uniform1i(loc.NB, Math.min(bites.length, MAXB - 1) + (feast && taken)); gl.uniform1f(loc.GONE, gone);
+    if (stood && !st && !gone && !still && peach.animate) drop(); // a bite has just taken the stem's footing; with reduced motion it simply goes
+    stood = st; gl.uniform1f(loc.ST, st);
     const t0 = performance.now();
     paint();
     if (timed < 3 && !feast) { // three frames are timed, and the fastest counts (the very first also pays for driver warm-up)
