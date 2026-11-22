@@ -157,9 +157,11 @@ precision mediump float;
 #define LITE
 #endif
 // R: canvas size. A: camera angles. B[i]: a bite's centre, and a random number of its own. U[i]: the jaw's axis across that bite, and 1/|centre|.
-// S: this peach's noise offset. Z[0], Z[1]: bruises, Z[2]: a scar (where on the fruit, how big). ST: 1 while the stem still has something to hold on to.
-uniform vec2 R,A;uniform vec4 B[7],U[7],Z[3];uniform vec3 S;uniform int NB;uniform float ST;
-#define MAXB 7
+// The first MAXB-1 are the visitor's bites, the rest the feast the last one sets off. NB: how many are taken. GONE: 1 once only the pit is left.
+// S: this peach's noise offset. Z[0], Z[1]: bruises, Z[2]: a scar (where on the fruit, how big). ST: 1 while the stem still has something to hold on to, 0 once it has not, 2 to draw stem and leaf with nothing else (for when they fall).
+#define MAXB 7   // bites it takes to finish a peach
+#define FEAST 12 // bites in the feast
+uniform vec2 R,A;uniform vec4 B[MAXB-1+FEAST],U[MAXB-1+FEAST],Z[3];uniform vec3 S;uniform int NB;uniform float ST,GONE;
 #define TH .022 // how thick the skin is
 mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
 #ifdef LITE
@@ -199,10 +201,11 @@ float body(vec3 p){
 // Only the nearest bite gets its tooth marks worked out, and they fade where it runs into the next one, so the surface stays whole.
 float bites(vec3 p,float d){
   float b=-1e3,b2=-1e3,c;vec3 o,q=vec3(0.);vec4 kb=vec4(0.),ku=vec4(0.); // b, q, kb, ku: the nearest bite. b2: the runner-up.
-  // Written out bite by bite, inside a loop of one so that break can stop at the last bite taken.
+  // The visitor's bites are written out one by one, inside a loop of one so that break can stop at the last bite taken.
   // Measured under software rendering, that costs a fraction of what indexing B[i] from a real loop does.
-  #define BITE(i) if(NB<=i)break;o=p-B[i].xyz;c=.42-length(o);if(c>b){b2=b;b=c;q=o;kb=B[i];ku=U[i];}else b2=max(b2,c);
-  for(int once=0;once<1;once++){BITE(0)BITE(1)BITE(2)BITE(3)BITE(4)BITE(5)}
+  // The feast's bites are bigger, and only there for a second, so a real loop will do for them.
+  #define BITE(i,r) if(NB<=i)break;o=p-B[i].xyz;c=r-length(o);if(c>b){b2=b;b=c;q=o;kb=B[i];ku=U[i];}else b2=max(b2,c);
+  for(int once=0;once<1;once++){BITE(0,.42)BITE(1,.42)BITE(2,.42)BITE(3,.42)BITE(4,.42)BITE(5,.42)for(int i=MAXB-1;i<MAXB-1+FEAST;i++){BITE(i,.76)}}
   if(b>.16)return b-.075; // well inside the hollow: its wall is at least this far off, however it is dented
   if(b>-.1){ // close enough to see the teeth: s runs across them, v the way they travelled
     float k=kb.w,s=dot(q,ku.xyz),v=dot(q,cross(kb.xyz,ku.xyz))*ku.w+(k-.5)*.08,f=smoothstep(0.,.07,b-b2);
@@ -239,18 +242,18 @@ float furrow(vec3 p){
 }
 // x: distance, y: what it is (0 skin, 1 stem, 2 leaf, 3 cut flesh, 4 pit)
 vec2 map(vec3 p){
-  vec2 r=vec2(1e3,0.);float h;
-  if(NB<MAXB){ // the last bite leaves only the pit
-    float d=body(p),c=bites(p,d);
-    r=c>d?vec2(c,3.):vec2(d,0.);
+  vec2 r=vec2(1e3,0.);float h,c;
+  if(GONE<.5){ // in the end only the pit is left
+    if(ST<1.5){float d=body(p);c=bites(p,d);r=c>d?vec2(c,3.):vec2(d,0.);}
     if(ST>.5&&.68-p.y<r.x){ // stem and leaf: gone with a bite that takes the top of the fruit, and never any lower than y=.68
-      c=stem(p,h);if(c<r.x)r=vec2(c,1.);
+      c=stem(p,h);if(ST>1.5)c=max(c,.85-p.y); // on its own, the stem ends where it broke off at the skin
+      if(c<r.x)r=vec2(c,1.);
       vec3 q=leafP(p);c=length(q)-.41; // leaf and pit are only worked out once the ray is inside a sphere around them
       if(c<r.x){if(c<.05)c=leaf(q);if(c<r.x)r=vec2(c,2.);}
     }
   }
   float k=length(p)-.57;
-  if(k<r.x){if(k<.05)k=pit(p);if(k<r.x)r=vec2(k,4.);}
+  if(ST<1.5&&k<r.x){if(k<.05)k=pit(p);if(k<r.x)r=vec2(k,4.);}
   return r;
 }
 vec3 tet(int i){return i==0?vec3(1.,-1.,-1.):i==1?vec3(-1.,-1.,1.):i==2?vec3(-1.,1.,-1.):vec3(1.);}
@@ -325,8 +328,8 @@ void main(){
   // everything from here happens in the peach's own frame, so camera, light and sky are turned into it
   ro.yz=rot(A.y)*ro.yz;rd.yz=rot(A.y)*rd.yz;L.yz=rot(A.y)*L.yz;up.yz=rot(A.y)*up.yz;
   ro.xz=rot(A.x)*ro.xz;rd.xz=rot(A.x)*rd.xz;L.xz=rot(A.x)*L.xz;up.xz=rot(A.x)*up.xz;
-  // two spheres hold everything: one round the fruit (or round the pit, once that is all there is), one round the leaf and the top of the stem
-  vec2 s1=sph(ro,rd,NB<MAXB?1.37:.36),s2=NB<MAXB&&ST>.5?sph(ro-vec3(.36,1.08,.06),rd,.2):vec2(1e3,-1e3);
+  // two spheres hold everything: one round the fruit (or round the pit, once that is all there is), one round stem and leaf
+  vec2 s1=ST<1.5?sph(ro,rd,GONE<.5?1.37:.36):vec2(1e3,-1e3),s2=GONE<.5&&ST>.5?sph(ro-vec3(.2,1.,.03),rd,.4):vec2(1e3,-1e3);
   float px=2.8/R.y,t=min(s1.x,s2.x),tend=max(s1.y,s2.y),tm=t,md=1e3,id=0.; // px: a pixel's width on the peach
   if(t>tend){gl_FragColor=vec4(0.);return;}
   bool hit=true; // a ray that runs out of steps is skimming a surface, and counts as having reached it
@@ -396,7 +399,7 @@ function noPeach() { // landscape + text still work
 function linked() { // asked every frame until the peach can be drawn
   if (kpc && !gl.getProgramParameter(pr, kpc.COMPLETION_STATUS_KHR)) return false;
   if (gl.getProgramParameter(pr, gl.LINK_STATUS)) {
-    gl.useProgram(pr); loc = Object.fromEntries(['R', 'A', 'B', 'U', 'Z', 'S', 'NB', 'ST'].map(n => [n, gl.getUniformLocation(pr, n)]));
+    gl.useProgram(pr); loc = Object.fromEntries(['R', 'A', 'B', 'U', 'Z', 'S', 'NB', 'ST', 'GONE'].map(n => [n, gl.getUniformLocation(pr, n)]));
     peach.style.opacity = ''; return ready = true;
   }
   console.error(gl.getProgramInfoLog(pr), ...(gl.getAttachedShaders(pr) || []).map(s => gl.getShaderInfoLog(s)));
@@ -427,28 +430,45 @@ try { seed = +localStorage.getItem('seed'); } catch (e) {}
 grow(seed > 0 && Number.isFinite(seed) ? seed : 1); // the first peach is the same for everyone
 
 // Bites: tap the peach to take one. Centres live in peach space and are remembered, so the peach stays bitten on the next visit.
-const MAXB = +FS.match(/#define MAXB (\d+)/)[1], bitesArr = new Float32Array(4 * MAXB), jawArr = new Float32Array(4 * MAXB);
+// The last one sets off a feast: FEAST big bites, one every BEAT milliseconds, that leave nothing but the pit.
+const MAXB = +FS.match(/#define MAXB (\d+)/)[1], FEAST = +FS.match(/#define FEAST (\d+)/)[1], BEAT = 80;
+const bitesArr = new Float32Array(4 * (MAXB - 1 + FEAST)), jawArr = new Float32Array(bitesArr.length); // the visitor's bites, then the feast's
 let bites = [], stem = 1, A = [0, 0]; // stem: whether it is still attached. A: camera angles of the last drawn frame
+let feast = 0, taken = 0, stemTill = 0; // feast: when it began, 0 if none is under way. taken: how many of its bites so far. stemTill: how many of them the stem outlasts
+let stood = 0; // whether the stem was still on the peach in the last frame drawn
 try { bites = JSON.parse(localStorage.getItem('bites')) || []; } catch (e) {}
 if (!Array.isArray(bites) || !bites.every(b => Array.isArray(b) && b.length == 3 && b.every(Number.isFinite))) bites = []; // garbage in storage
 bites = bites.slice(0, MAXB);
+const across = n => { const u = Math.abs(n[1]) > .95 ? [0, -n[2], n[1]] : [n[2], 0, -n[0]], l = Math.hypot(...u) || 1; return u.map(v => v / l); }; // a level direction at right angles to n (any, if n points straight up or down)
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+function slot(i, b) { // what the shader shapes bite i with: a random number of its own, and which way the jaw lay across it
+  const l = Math.hypot(...b) || 1, n = b.map(v => v / l), k = hash(b[0] * 3.1 + b[1] * 5.7 + b[2] * 9.3), a = (k - .5) * .9, u = across(n), w = cross(n, u);
+  bitesArr.set([...b, k], i * 4); jawArr.set([...u.map((v, j) => v * Math.cos(a) + w[j] * Math.sin(a)), 1 / l], i * 4); // level, then tilted a little, as heads are
+}
+const caption = () => trivia.textContent = gl && bites.length >= MAXB && !feast ? 'All gone. Tap the pit for another.' : triviaText;
 function saveBites() {
   bitesArr.fill(0); jawArr.fill(0);
-  bites.forEach((b, i) => { // what the shader shapes each bite with: a random number of its own, and which way the jaw lay across it
-    const l = Math.hypot(...b) || 1, n = b.map(v => v / l), k = hash(b[0] * 3.1 + b[1] * 5.7 + b[2] * 9.3), a = (k - .5) * .9;
-    let u = Math.abs(n[1]) > .95 ? [0, -n[2], n[1]] : [n[2], 0, -n[0]]; // level, unless the bite went into the very top or bottom
-    const ul = Math.hypot(...u) || 1, w = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
-    bitesArr.set([...b, k], i * 4); jawArr.set([...u.map((v, j) => (v * Math.cos(a) + w[j] * Math.sin(a)) / ul), 1 / l], i * 4); // then tilted a little, as heads are
-  });
-  stem = +bites.every(b => Math.hypot(b[0], b[1] - .87, b[2]) > .4); // it stands at (0, .87, 0), and goes with a bite that takes the ground from under it
+  bites.slice(0, MAXB - 1).forEach((b, i) => slot(i, b));
+  stem = +bites.slice(0, MAXB - 1).every(b => Math.hypot(b[0], b[1] - .87, b[2]) > .4); // it stands at (0, .87, 0), and goes with a bite that takes the ground from under it
   timed = 0; best = Infinity; // a bitten peach costs more to draw than a whole one: time it again
   try { localStorage.setItem('bites', JSON.stringify(bites)); } catch (e) {}
-  trivia.textContent = gl && bites.length >= MAXB ? 'All gone. Tap the pit for another.' : triviaText;
+  caption();
+}
+// The feast's bites sit on the corners of an icosahedron, one corner where the last tap landed. Twelve of radius .76 (the shader's),
+// centred .8 out, reach every bit of flesh however the corners fall, so the last of them leaves exactly the pit.
+function feastOn(at, cam) { // at: where the tap landed. cam: where the camera stood. Both in peach space.
+  const l = Math.hypot(...at) || 1, n = at.map(v => v / l), u = across(n), w = cross(n, u), facing = d => d[0] * cam[0] + d[1] * cam[1] + d[2] * cam[2];
+  const rest = Array.from({ length: 10 }, (_, k) => n.map((v, j) => .8944 * (Math.cos(k * Math.PI / 5) * u[j] + Math.sin(k * Math.PI / 5) * w[j]) + (k % 2 ? -.4472 : .4472) * v)); // two rings of five
+  const order = [n, ...[...rest, n.map(v => -v)].sort((a, b) => facing(b) - facing(a))].map(d => d.map(v => v * .8)); // the tap first, then front to back, so each one shows
+  order.forEach((c, i) => slot(MAXB - 1 + i, c));
+  stemTill = order.findIndex(c => Math.hypot(c[0], c[1] - .87, c[2]) < .8); if (stemTill < 0) stemTill = FEAST; // the stem goes with the first bite that reaches its foot, sooner rather than left hanging
+  feast = performance.now(); taken = 0; caption();
+  navigator.vibrate?.(Array(FEAST).fill([20, BEAT - 20]).flat());
 }
 saveBites();
 const rot2 = (x, y, a) => [Math.cos(a) * x + Math.sin(a) * y, Math.cos(a) * y - Math.sin(a) * x]; // same rot() as the shader
 peach.addEventListener('click', e => {
-  if (!ready) return;
+  if (!ready || feast) return;
   if (bites.length >= MAXB) { bites = []; grow(1 + Math.floor(Math.random() * 1e6)); saveBites(); return; } // tapping the pit grows a fresh peach
   // the tap as a ray in peach space, through the shader's camera; a sphere of radius 1.05 stands in for the peach
   const r = peach.getBoundingClientRect(), ux = (e.clientX - r.left) / r.width * 2 - 1, uy = 1 - (e.clientY - r.top) / r.height * 2, len = Math.hypot(ux, uy, 2.6);
@@ -469,9 +489,26 @@ peach.addEventListener('click', e => {
   // a bite takes a sphere centred just above what the teeth met, so going back to the same place digs down to the pit
   const at = ro.map((o, i) => o + rd[i] * t), l = Math.hypot(...at) || 1;
   bites.push(at.map(v => +(v * (1 + .126 / l)).toFixed(3)));
-  saveBites(); navigator.vibrate?.(15);
+  saveBites();
+  if (bites.length >= MAXB && !still) feastOn(at, ro); else navigator.vibrate?.(15); // with reduced motion the peach is simply gone
 });
 
+const see = P => { // where a point of the peach shows on its canvas, as fractions of its width and height: the shader's camera, the other way round
+  let [x, y, z] = P; [x, z] = rot2(x, z, -A[0]); [y, z] = rot2(y, z, -A[1]);
+  const k = 1.3 / (3.6 - z); return [.5 + x * k, .5 - (y - .1) * k];
+};
+// Stem and leaf fall: one frame of them alone goes to a canvas of its own, laid exactly over the peach, and that topples off the bottom of the screen.
+function drop() {
+  gl.uniform1f(loc.ST, 2); paint();
+  const r = peach.getBoundingClientRect(), box = document.body.appendChild(document.createElement('div')), c = box.appendChild(document.createElement('canvas'));
+  c.width = peach.width; c.height = peach.height; c.getContext('2d').drawImage(peach, 0, 0);
+  const [ox, oy] = see([.2, 1, .03]), side = Math.sign(see([.65, 1.26, 0])[0] - see([0, .87, 0])[0]) || 1, T = 1100; // it turns about its own middle, and goes the way the leaf leans
+  box.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;pointer-events:none`;
+  c.style.cssText = `display:block;width:${r.width}px;height:${r.height}px;transform-origin:${ox * 100}% ${oy * 100}%`;
+  // a small hop as it comes loose, then gravity; all the while it drifts sideways and turns at a steady rate
+  box.animate([{ transform: 'none', easing: 'ease-out' }, { transform: `translateY(${-r.height * .05}px)`, offset: .15, easing: 'cubic-bezier(.55,.085,.68,.53)' }, { transform: `translateY(${innerHeight - r.top + r.height * .3}px)` }], { duration: T, fill: 'forwards' }).onfinish = () => box.remove();
+  c.animate([{ transform: 'none' }, { transform: `translateX(${side * r.width * .45}px) rotate(${side * 200}deg)` }], { duration: T, fill: 'forwards' });
+}
 const pixel = new Uint8Array(4);
 function paint() { gl.viewport(0, 0, peach.width, peach.height); gl.uniform2f(loc.R, peach.width, peach.height); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function frame(ms) {
@@ -480,10 +517,19 @@ function frame(ms) {
   draw(t);
   if (gl && (ready || linked())) {
     A = [pc * Math.PI + pxc * .4 + (still ? 0 : t * .25), -pyc * .25]; // half a turn per scene
-    gl.uniform2f(loc.A, A[0], A[1]); gl.uniform4fv(loc.B, bitesArr); gl.uniform4fv(loc.U, jawArr); gl.uniform4fv(loc.Z, Z); gl.uniform3fv(loc.S, S); gl.uniform1i(loc.NB, bites.length); gl.uniform1f(loc.ST, stem);
+    if (feast) { // which of its bites are due by now?
+      const k = Math.max(1, Math.floor((ms - feast) / BEAT) + 1);
+      if (k > FEAST) { feast = 0; caption(); timed = 0; best = Infinity; } // over: only the pit is left, and that is cheap to draw, so time it again
+      else if (k > taken) { taken = k; peach.animate?.([{ transform: 'scale(.96)' }, { transform: 'none' }], BEAT); } // each one jolts the fruit
+    }
+    gl.uniform2f(loc.A, A[0], A[1]); gl.uniform4fv(loc.B, bitesArr); gl.uniform4fv(loc.U, jawArr); gl.uniform4fv(loc.Z, Z); gl.uniform3fv(loc.S, S);
+    const gone = !feast && bites.length >= MAXB, st = +(feast ? stem && taken <= stemTill : stem);
+    gl.uniform1i(loc.NB, Math.min(bites.length, MAXB - 1) + (feast && taken)); gl.uniform1f(loc.GONE, gone);
+    if (stood && !st && !gone && !still && peach.animate) drop(); // a bite has just taken the stem's footing; with reduced motion it simply goes
+    stood = st; gl.uniform1f(loc.ST, st);
     const t0 = performance.now();
     paint();
-    if (timed < 3) { // three frames are timed, and the fastest counts (the very first also pays for driver warm-up)
+    if (timed < 3 && !feast) { // three frames are timed, and the fastest counts (the very first also pays for driver warm-up)
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); const t1 = performance.now(); // this one waits for the GPU to finish the frame
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);                              // this one for nothing, so it shows what the asking costs
       best = Math.min(best, Math.max(0, 2 * t1 - t0 - performance.now()));
