@@ -672,6 +672,14 @@ precision mediump float;
 #define MAXB 7   // bites it takes to finish a peach
 #define FEAST 12 // bites in the feast
 uniform vec3 V;uniform mat3 C;uniform vec4 B[MAXB-1+FEAST],U[MAXB-1+FEAST],Z[3];uniform vec3 S;uniform int NB;uniform float ST,GONE;
+#ifdef FINE
+// Zoomed in on further than a float can follow the surface, the script works out where the middle of the screen is looking (see aim() there) and the
+// shader works outwards from that point: DEEP is 1 then. P0: the point of the peach that shows at the pixel RC, T0 along the ray RD (S0: that ray's
+// length before it was made a unit). N0: the way the surface faces there, G0: the same as nor() would have it. ID: what it is. Of the lattice of its
+// cells at P0, CI is the whole part and CF the rest, and PH where that puts the bend the lattice is given; HI and HF: the same for the layers of hairs.
+uniform float DEEP,ID,T0,S0;uniform vec2 RC;uniform vec3 P0,N0,G0,RD,CI,CF,PH,HI[5],HF[5];
+vec3 DP; // how far along the surface from P0 this pixel looks
+#endif
 #define TH .022 // how thick the skin is
 mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
 #ifdef LITE
@@ -841,12 +849,12 @@ vec3 vn3(vec3 x){ // three noises at the price of one: plainer than vn, which is
   vec3 i=floor(x),f=fract(x),u=f*f*(3.-2.*f);vec2 o=vec2(0.,1.);
   return mix(mix(mix(h3(i),h3(i+o.yxx),u.x),mix(h3(i+o.xyx),h3(i+o.yyx),u.x),u.y),mix(mix(h3(i+o.xxy),h3(i+o.yxy),u.x),mix(h3(i+o.xyy),h3(i+o.yyy),u.x),u.y),u.z);
 }
-// Two hairs to a cell of x, lying along the skin (n: the way it faces): anywhere in the cell, tapered to a point at either end, a little bent, and gone
+// Two hairs to a cell of the lattice ci+x (ci: its whole part, kept apart so that the rest stays exact however far in the view is), lying along the skin (n: the way it faces): anywhere in the cell, tapered to a point at either end, a little bent, and gone
 // before the cell's edge, so that none is cut short. They lie more or less one way (fl), as a nap does. w: half a hair's width, a: a pixel's width, both
 // in cells. dn: how many of the cells have any. Returns how much of the pixel a hair covers. k: where across the hair the pixel lies, -1 to 1.
 // e: the direction across it. sh: the shade the hairs cast on the skin beside them.
-float hair(vec3 x,vec3 n,vec3 fl,float w,float a,float dn,out float k,out vec3 e,out float sh){
-  vec3 i=floor(x),f=fract(x)-.5,r=h3(i),o=h3(i+7.),g=1.-smoothstep(.34,.5,abs(f));
+float hair(vec3 ci,vec3 x,vec3 n,vec3 fl,float w,float a,float dn,out float k,out vec3 e,out float sh){
+  vec3 i=ci+floor(x),f=fract(x)-.5,r=h3(i),o=h3(i+7.),g=1.-smoothstep(.34,.5,abs(f));
   float win=step(fract(r.y*7.3),dn)*g.x*g.y*g.z,m=0.;k=0.;sh=0.;e=vec3(0.);
   for(int j=0;j<2;j++){
     vec3 d=o*2.-1.+fl;d=normalize(d-n*dot(d,n)+1e-4);vec3 ej=cross(n,d),q=f-(r-.5)*.34;
@@ -857,12 +865,12 @@ float hair(vec3 x,vec3 n,vec3 fl,float w,float a,float dn,out float k,out vec3 e
   }
   return m;
 }
-// Cells: a sponge of them, cut through by the surface. Returns how far it is to the nearest wall, and a number of the cell's own.
+// Cells: a sponge of them, cut through by the surface, at ci+x in their lattice. Returns how far it is to the nearest wall, and a number of the cell's own.
 // u: the way to that wall. m: the way to the cell's middle, and how far.
-vec2 cells(vec3 x,out vec3 u,out vec3 m){
+vec2 cells(vec3 ci,vec3 x,out vec3 u,out vec3 m){
   vec3 i=floor(x-.5),f=x-i,v1=vec3(0.),v2=vec3(0.);float d1=9.,d2=9.,id=0.;
   for(int j=0;j<8;j++){ // the eight cells around: with their middles kept away from their edges, the nearest two are among them
-    float fj=float(j);vec3 o=vec3(mod(fj,2.),mod(floor(fj*.5),2.),floor(fj*.25)),h=h3(i+o),v=o+.2+.6*h-f;float d=dot(v,v);
+    float fj=float(j);vec3 o=vec3(mod(fj,2.),mod(floor(fj*.5),2.),floor(fj*.25)),h=h3(ci+i+o),v=o+.2+.6*h-f;float d=dot(v,v);
     if(d<d1){d2=d1;v2=v1;d1=d;v1=v;id=fract(h.x*57.+h.y*13.);}else if(d<d2){d2=d;v2=v;}
   }
   m=v1;v2-=v1;float l=max(length(v2),1e-4);u=v2/l;
@@ -884,22 +892,24 @@ void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,inout vec3 c,in
     if(w>0.){vec3 q=p*f+S,v=vn3(q+.45*sin(q.yzx*1.9))-.5;c*=1.+k*v.x*w;m2=v.y;if(id>.5)sl+=(v-n*dot(v,n))*(k*w);} // (bent out of line, or its grid would show)
   }
   if(wc>0.){
-    vec3 u,v,x=M*(p*F)+S;vec2 k=cells(x+.3*sin(x.yzx*1.3),u,v);    // turned and bent a little, so that they do not line up in rows
+    vec3 u,v,ci,x;                                                  // the lattice of the cells, turned and bent a little so that they do not line up in rows
+    if(DEEP>.5){ci=CI;x=CF+M*(DP*F);x+=.3*sin(PH+1.3*x.yzx);}       // (from the script's exact figures, when a float no longer reaches)
+    else{x=M*(p*F)+S;ci=floor(x);x=x-ci+.3*sin(x.yzx*1.3);}
+    vec2 k=cells(ci,x,u,v);vec3 q=-v,nl=M*n;                        // q: where in its cell this is, from the cell's middle; nl: the way the surface faces, in the lattice
     float a=fm*px,wall=clamp((W.x-k.x)/a+.5,0.,1.)*min(1.,2.*W.x/a);
     c*=(1.+.34*(k.y-.5)*wc)*(1.-W.y*wall*wc);                       // some cells hold more colour than others
     u=u*M;v=v*M;v-=n*dot(v,n);sl+=v*(W.z*wc);                       // and each one bulges a little
     if(id<.5){
-      float rim=1.-smoothstep(0.,.4,k.x),wg=fade(5000.,px),ws=fade(8000.,px);
+      float rim=1.-smoothstep(0.,.4,k.x),ws=fade(8000.,px);
       c=mix(c,vec3(1.,.86,.55),.38*cov*step(.95,k.y)*wc);           // in the blush, the odd one holds none
-      if(wg>0.)c=mix(c,c*vec3(.8,.6,.5),.5*wg*dots(p*5000.+S,.55)); // the grains inside them
       if(ws>0.){                                                    // the ridges of the wax over them, which run their own way on every cell
-        vec3 d=normalize(sin(k.y*vec3(40.,73.,91.)+vec3(0.,1.,2.)));d=normalize(d-n*dot(d,n)+1e-4);
-        float ph=dot(p,d)*5.2e4+12.*m2;
-        sl+=d*(.2*cos(ph)*ws*(1.-rim));c*=1.+.05*sin(ph)*ws;
+        vec3 d=normalize(sin(k.y*vec3(40.,73.,91.)+vec3(0.,1.,2.)));d=normalize(d-nl*dot(d,nl)+1e-4);
+        float ph=dot(q,d)*52.+12.*m2;
+        sl+=(d*M)*(.2*cos(ph)*ws*(1.-rim));c*=1.+.05*sin(ph)*ws;
       }
       c=mix(c,vec3(1.,.93,.78),(.14*rim+.3*wall)*wc);               // the colour is in the middle of each; their walls show as pale lines
       sl-=(u-n*dot(u,n))*(.5*wall*wc);                              // and lie in the creases between
-    }else if(id>1.5&&id<2.5)c=mix(c,vec3(.75,.9,.5),.5*wc*dots(p*300.+S,.3)); // the pores a leaf breathes through
+    }
   }
   if(id<.5){ // the fuzz, a layer at a time: three of fine underfur, then two of longer, stouter hairs over it. R turns each layer's cells, so that no two line up.
     float dn=.35+.6*fz,f=70.,w=1.3e-4;mat3 R=mat3(1.); // (rubbed thin in places, matted where juice has run)
@@ -907,7 +917,8 @@ void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,inout vec3 c,in
       if(i==3){f=30.;w=2.2e-4;}
       float wt=smoothstep(.12,.4,w/px),k,sh;vec3 e;
       if(wt>0.){
-        float m=hair(R*(p*f)+S+4.*float(i),R*n,R*vec3(.35,-1.1,.25),w*f,px*f,dn,k,e,sh)*wt;
+        vec3 ci=vec3(0.),x=R*(p*f)+S+4.*float(i);if(DEEP>.5){ci=HI[i];x=HF[i]+R*(DP*f);}
+        float m=hair(ci,x,R*n,R*vec3(.35,-1.1,.25),w*f,px*f,dn,k,e,sh)*wt;
         c*=1.-.3*sh*wt*(1.-m);                                      // a hair shades the skin beside it
         c=mix(c,mix(c,vec3(1.,.95,.84),.5+.2*k*k)*(1.-.2*k*k),m);   // it is pale and hollow: more of the skin's colour comes through its middle than its sides
         sl=sl*(1.-m)-(e*R)*(1.6*k*m);spe+=.25*m;                    // and round: sloping away to either side
@@ -919,20 +930,31 @@ void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,inout vec3 c,in
 #endif
 vec2 sph(vec3 o,vec3 d,float r2){float b=dot(o,d),h=b*b-dot(o,o)+r2;return h<0.?vec2(1e3,-1e3):vec2(-b-sqrt(h),-b+sqrt(h));} // where a ray enters and leaves a sphere
 void main(){
-  vec2 uv=(gl_FragCoord.xy-V.xy)*V.z;
-  // everything happens in the peach's own frame, so camera, light and sky are turned into it
-  vec3 ro=C*vec3(0.,.1,3.6),rd=C*normalize(vec3(uv,-2.6)),L=C*normalize(vec3(-.6,.7,.8)),up=C[1];
-  // two spheres hold everything: one round the fruit (or round the pit, once that is all there is), one round stem and leaf
-  vec2 s1=ST<1.5?sph(ro,rd,GONE<.5?1.37:.36):vec2(1e3,-1e3),s2=GONE<.5&&ST>.5?sph(ro-vec3(.2,1.,.03),rd,.4):vec2(1e3,-1e3);
-  float px=1.4*V.z,t=min(s1.x,s2.x),tend=max(s1.y,s2.y),tm=t,md=1e3,id=0.; // px: a pixel's width on the peach
-  if(t>tend){gl_FragColor=vec4(0.);return;}
+  float px=1.4*V.z,t=0.,id=0.,halo=0.,a=1.; // px: a pixel's width on the peach
+  vec3 rd,p,g,col,L=C*normalize(vec3(-.6,.7,.8)),up=C[1]; // everything happens in the peach's own frame, so camera, light and sky are turned into it
   bool hit=true; // a ray that runs out of steps is skimming a surface, and counts as having reached it
-  for(int i=0;i<100;i++){vec2 m=map(ro+rd*t);if(m.x<md){md=m.x;tm=t;id=m.y;}if(m.x<.45*px)break;t+=m.x*.85;if(t>tend){hit=false;break;}}
-  float halo=hit||id>.5?0.:1.-clamp(md/.016,0.,1.); // fuzz stands a little off the skin and softens its outline
-  float a=max(hit?1.:1.-smoothstep(0.,1.07*px,md),.3*halo*halo);
-  if(a<=0.){gl_FragColor=vec4(0.);return;}
-  vec3 p=ro+rd*(hit?t:tm),g=nor(p,max(.5*px,.0008)),col;
-  float spe=.3,shn=18.,fz=0.,sub=0.,wet=0.,cov=0.; // highlight strength and tightness, fuzz, how much light passes through, juice, blush
+#ifdef FINE
+  if(DEEP>.5){ // no feeling for the surface along a ray: it is the flat of the surface at P0, and this pixel's ray meets it DP from there
+    vec2 e2=(gl_FragCoord.xy-RC)*V.z;vec3 e=C[0]*e2.x+C[1]*e2.y;
+    float ep=(2.*dot(RD,e)*S0+dot(e,e))/(S0*S0),k=sqrt(1.+ep);
+    vec3 dl=(e-RD*(S0*ep/(1.+k)))/(S0*k); // how this pixel's ray differs from RD: all of it small numbers, so none of it is lost
+    DP=T0*(dl*dot(N0,RD)-RD*dot(N0,dl))/(dot(N0,RD)+dot(N0,dl));
+    rd=RD+dl;p=P0+DP;g=G0;id=ID;t=T0;
+  }else
+#endif
+  {
+    vec2 uv=(gl_FragCoord.xy-V.xy)*V.z;vec3 ro=C*vec3(0.,.1,3.6);rd=C*normalize(vec3(uv,-2.6));
+    // two spheres hold everything: one round the fruit (or round the pit, once that is all there is), one round stem and leaf
+    vec2 s1=ST<1.5?sph(ro,rd,GONE<.5?1.37:.36):vec2(1e3,-1e3),s2=GONE<.5&&ST>.5?sph(ro-vec3(.2,1.,.03),rd,.4):vec2(1e3,-1e3);
+    float tend=max(s1.y,s2.y),tm,md=1e3;t=min(s1.x,s2.x);tm=t;
+    if(t>tend){gl_FragColor=vec4(0.);return;}
+    for(int i=0;i<100;i++){vec2 m=map(ro+rd*t);if(m.x<md){md=m.x;tm=t;id=m.y;}if(m.x<.45*px)break;t+=m.x*.85;if(t>tend){hit=false;break;}}
+    halo=hit||id>.5?0.:1.-clamp(md/.016,0.,1.); // fuzz stands a little off the skin and softens its outline
+    a=max(hit?1.:1.-smoothstep(0.,1.07*px,md),.3*halo*halo);
+    if(a<=0.){gl_FragColor=vec4(0.);return;}
+    p=ro+rd*(hit?t:tm);g=nor(p,max(.5*px,.0008));
+  }
+  float spe=.3,shn=18.,fz=0.,sub=0.,wet=0.,cov=0.,mu=0.; // highlight strength and tightness, fuzz, how much light passes through, juice, blush; mu: see below
   if(id<.5){
     vec4 k=skinC(p,px,fz);wet=smoothstep(-.09,-.012,bites(p,0.)); // juice runs over the edge of a bite and mats the fuzz
     col=k.rgb*(1.-.18*wet);fz*=1.-wet;cov=k.a;spe=mix(.34-.26*fz,.4,wet);shn=mix(14.,70.,wet);sub=.1;wet*=.4;
@@ -964,10 +986,11 @@ void main(){
   if(px<.0033){ // under the glass: never in the normal view, where a pixel is wider than this. (A pixel covers more of a surface seen from the side.)
     vec3 sl=vec3(0.);fineness(p,g,px/max(.25,-dot(g,rd)),id,cov,fz,col,sl,spe);n=normalize(n-sl);
   }
+  mu=1.-smoothstep(1.2e-5,6e-5,px); // far enough in, the day's light gives way to the lamp of a microscope: the same on every part of the peach, lit side or dark
 #endif
-  float ndl=dot(n,L),dif=clamp(ndl,0.,1.),ndv=clamp(-dot(n,rd),0.,1.),sh=1.,occ=1.,thin=dif;
+  float ndl=dot(n,L),dif=clamp(ndl,0.,1.),ndv=clamp(-dot(n,rd),0.,1.),sh=1.,occ=1.,thin=dif;vec3 alb=col;
 #ifndef LITE
-  if(hit){occ=ao(p,g);sh=dot(g,L)>0.?shadow(p+g*.004,L):0.;if(sub>0.)thin=smoothstep(-.07,.05,map(p+L*.11).x);}
+  if(hit&&mu<1.){occ=ao(p,g);sh=dot(g,L)>0.?shadow(p+g*.004,L):0.;if(sub>0.)thin=smoothstep(-.07,.05,map(p+L*.11).x);}
 #endif
   occ=mix(occ,1.,.45*sub); // flesh and leaf pass light around inside themselves, so their hollows never go fully dark
   vec3 lit=vec3(1.,.96,.9)*.72*dif*sh+mix(vec3(.36,.28,.26),vec3(.44,.42,.46),.5+.5*dot(n,up))*(.35+.65*occ);
@@ -977,6 +1000,10 @@ void main(){
     +pow(clamp(dot(n,normalize(L-rd)),0.,1.),shn)*spe*sh
     +pow(1.-ndv,3.)*vec3(.3,.22,.2)*occ
     +fz*vec3(.95,.85,.75)*(.07+.33*pow(1.-ndv,2.5))*(.3+.7*clamp(ndl*.5+.5,0.,1.))*occ; // fuzz: a pale haze, brightest edge-on
+  if(mu>0.){ // the lamp: up and to the left of the screen, wherever on the peach this is
+    vec3 tx=normalize(C[0]-g*dot(C[0],g)+1e-4*C[1]),lm=normalize(-.5*tx+.55*cross(g,tx)+.67*g);
+    col=mix(col,alb*(vec3(.5,.49,.48)+vec3(.62,.6,.56)*clamp(dot(n,lm),0.,1.))+pow(clamp(dot(n,normalize(lm-rd)),0.,1.),shn)*spe+wet*.2*pow(1.-ndv,4.),mu);
+  }
   col=mix(col,mix(col,vec3(1.,.93,.84),.5)*(.4+.6*clamp(ndl*.5+.5,0.,1.)),halo);
   gl_FragColor=vec4(col*a,a);
 }`;
@@ -996,7 +1023,7 @@ function make(def) {
   gl.bindAttribLocation(p, 0, 'v'); gl.linkProgram(p); return p;
 }
 const build = () => pr = make(lite ? '#define LITE\n' : '');
-const where = p => Object.fromEntries(['V', 'C', 'B', 'U', 'Z', 'S', 'NB', 'ST', 'GONE'].map(n => [n, gl.getUniformLocation(p, n)]));
+const where = p => Object.fromEntries(['V', 'C', 'B', 'U', 'Z', 'S', 'NB', 'ST', 'GONE', 'DEEP', 'ID', 'T0', 'S0', 'RC', 'P0', 'N0', 'G0', 'RD', 'CI', 'CF', 'PH', 'HI', 'HF'].map(n => [n, gl.getUniformLocation(p, n)]));
 function noPeach() { // landscape + text still work
   gl = null; peach.hidden = seat.hidden = grip.hidden = spot.hidden = true; trivia.textContent = triviaText;
   const c = document.querySelector('.s p'); if (c) c.textContent = 'Scroll on.';
@@ -1103,11 +1130,74 @@ const see = P => { // where a point of the peach shows on its canvas, as fractio
   const k = 2.6 / (3.6 - z), s = seat.getBoundingClientRect(), c = peach.getBoundingClientRect(), h = s.width * zoom / 2;
   return [(s.left + s.width / 2 + (x * k - cx) * h - c.left) / c.width, (s.top + s.height / 2 - ((y - .1) * k - cy) * h - c.top) / c.height];
 };
+// The shapes again, as the shader has them (body, bites, stem, leaf, pit and map, line for line), for the one thing a GPU's arithmetic cannot do: say,
+// to a millionth of a millionth, where on the peach the middle of the screen is looking, once it is zoomed in on further than a float can follow.
+// Whatever changes in the shader's shapes has to change here too (zoom.js compares the two by eye: the picture must not move where one takes over from the other).
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }, fr = x => x - Math.floor(x), TH = +FS.match(/#define TH ([\d.]+)/)[1];
+function sdBody(x, y, z) {
+  const e = Math.hypot(x * .93, y * .98, z * .96) - 1; if (e > .3) return e - .12;
+  const qy = y + 1, qz = z - .1, ch = Math.abs(x) - .45, a = 1 / (1 + (x * x + z * z) * 35), b = 1 / (1 + (x * x + qy * qy + qz * qz) * 45);
+  const groove = Math.exp(-x * x * 32) * sstep(-.3, .5, z) * sstep(-1.2, .1, y), cavity = Math.exp(-(x * x + z * z) * 10) * sstep(.2, 1, y);
+  return e + .1 * groove - (.07 + .012 * x) * Math.exp(-ch * ch * 6) * sstep(-.4, .6, z) + .12 * cavity + .03 * a * a * sstep(.4, 1, y) - .025 * b * b + .012 * Math.sin(x * 3 + S[0]) * Math.sin(y * 2.6 + z * 3.2 + S[1]);
+}
+function sdBites(x, y, z, d, nb) {
+  let b = -1e3, b2 = -1e3, k = -1, qx = 0, qy = 0, qz = 0;
+  for (let i = 0; i < nb && i < MAXB - 1 + FEAST; i++) { const ox = x - bitesArr[4 * i], oy = y - bitesArr[4 * i + 1], oz = z - bitesArr[4 * i + 2], c = (i < MAXB - 1 ? .42 : .76) - Math.hypot(ox, oy, oz); if (c > b) { b2 = b; b = c; k = i; qx = ox; qy = oy; qz = oz; } else b2 = Math.max(b2, c); }
+  if (b > .16) return b - .075;
+  if (b > -.1) {
+    const [kx, ky, kz, kw] = bitesArr.subarray(4 * k, 4 * k + 4), [ux, uy, uz, uw] = jawArr.subarray(4 * k, 4 * k + 4), cr = cross([kx, ky, kz], [ux, uy, uz]);
+    const s = qx * ux + qy * uy + qz * uz, v = (qx * cr[0] + qy * cr[1] + qz * cr[2]) * uw + (kw - .5) * .08, f = sstep(0, .07, b - b2), t = Math.abs(fr(s * 5 + kw) * 2 - 1), w = b - .075, m = Math.max(0, 1 - v * v * 250);
+    let c = .022 * t * t + .016 * m * m;
+    if (d > -TH * 2.2) c += (1 - sstep(TH * .6, TH * 2.2, -d)) * (.009 + .05 * (Math.abs(fr(s * 9 + kw * 3) - .5) - .25) * (Math.abs(fr(v * 8 + kw * 5) - .5) - .25) * 4);
+    b = Math.max(w, (b - c * f) * .7);
+  }
+  return b;
+}
+function sdStem(x, y, z) { const pay = y - .75, d = x * .04 + pay * .45, h = clamp(d / .2041, 0, 1), paz = z + .12 * h * (1 - h); return Math.max(Math.hypot(x - .04 * h, pay - .45 * h, paz) - .04 - .025 * (1 - h) * (1 - h) - .013 * sstep(.72, 1, h), (d - .2041) * 2.214 - .008) * .9; }
+function sdLeaf(q) { const u = clamp(q[0] / .72 + .5, 0, 1), w = .42 * Math.sqrt(u) * (1 - u) + .007 * fr(u * 19) * (u >= .08), y = Math.abs(q[1]), z = q[2] - .3 * y + .45 * q[0] * q[0];
+  return Math.max(Math.max((y - w) * .8, Math.abs(q[0]) - .36, Math.abs(z) - .005 - .016 * clamp(1 - y / (w + .001), 0, 1)), .045 - Math.hypot(q[0] - .07, q[1] - .16)) * .8; }
+function sdPit(x, y, z) { y += .03; const k0 = .68 + .32 * sstep(-.5, .1, y); x /= k0; z /= k0;
+  const e0 = Math.hypot(x / .25, y / .5, z / .36), e1 = Math.hypot(x / .0625, y / .25, z / .1296), ax = Math.abs(x), k = Math.max(0, 1 - ax * ax * 180), g = Math.max(0, 1 - (ax - .07) * (ax - .07) * 450);
+  return (e0 * (e0 - 1) / e1 + .009 * Math.sin(y * 24 + z * 9) * Math.sin(z * 21 + x * 19) - .02 * k * k + .012 * g * g * (z >= 0)) * .75; }
+function shape(x, y, z, nb, gone, st) { // map(): [how far to the nearest of it, what that is]
+  let r = 1e3, id = 0;
+  if (!gone) {
+    if (st < 1.5) { const d = sdBody(x, y, z), c = sdBites(x, y, z, d, nb); if (c > d) { r = c; id = 3; } else r = d; }
+    if (st > .5 && .68 - y < r) {
+      let c = sdStem(x, y, z); if (st > 1.5) c = Math.max(c, .85 - y);
+      if (c < r) { r = c; id = 1; }
+      const [lx, ly] = rot2(x - .36, y - 1.08, .55), q = [lx, ly, z - .06]; c = Math.hypot(lx, ly, q[2]) - .41;
+      if (c < r) { if (c < .05) c = sdLeaf(q); if (c < r) { r = c; id = 2; } }
+    }
+  }
+  let k = Math.hypot(x, y, z) - .57;
+  if (st < 1.5 && k < r) { if (k < .05) k = sdPit(x, y, z); if (k < r) { r = k; id = 4; } }
+  return [r, id];
+}
+// Where the middle of the screen is looking, for the shader's DEEP: the point of the peach on the ray through the pixel at (uc, vc) of the picture, how the
+// surface lies there, what it is, and where that point falls in the lattices its cells and its hairs are laid out on (whole part and the rest, apart).
+// Cm: the camera's matrix. Returns nothing where there is no peach to look at, or it is seen too nearly edge-on to stand for the whole screen.
+const mulM = v => [.36 * v[0] - .8 * v[1] + .48 * v[2], .48 * v[0] + .6 * v[1] + .64 * v[2], -.8 * v[0] + .6 * v[2]]; // the shader's M
+const CELLS = [[1000, 1000, 1000], [520, 170, 520], [650, 650, 650], [260, 260, 260], [700, 700, 700]]; // cells to a unit, by what it is: skin, bark, leaf, flesh, stone (fineness() has the same)
+function aim(Cm, uc, vc, nb, gone, st, px) {
+  const s0 = Math.hypot(uc, vc, 2.6), mulC = v => [0, 1, 2].map(i => Cm[i] * v[0] + Cm[3 + i] * v[1] + Cm[6 + i] * v[2]), ro = mulC([0, .1, 3.6]), rd = mulC([uc / s0, vc / s0, -2.6 / s0]);
+  const at = (P, e, k) => shape(P[0] + k[0] * e, P[1] + k[1] * e, P[2] + k[2] * e, nb, gone, st)[0], unit = v => { const l = Math.hypot(...v) || 1; return v.map(c => c / l); };
+  let t = 0, id = -1;
+  for (let i = 0; i < 400 && id < 0; i++) { const [d, what] = shape(ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t, nb, gone, st); if (Math.abs(d) < 1e-13) id = what; else if ((t += d * .85) > 8) return null; }
+  if (id < 0) return null;
+  const P = ro.map((o, i) => o + rd[i] * t), axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tet = [[1, -1, -1], [-1, -1, 1], [-1, 1, -1], [1, 1, 1]], e = Math.max(.5 * px, .0008);
+  const n = unit(axes.map(k => at(P, 1e-6, k) - at(P, -1e-6, k))), g = unit(tet.reduce((a, k) => { const d = at(P, e, k); return a.map((c, i) => c + k[i] * d); }, [0, 0, 0])); // the surface's true lie, and nor()'s
+  if (-(n[0] * rd[0] + n[1] * rd[1] + n[2] * rd[2]) < .15) return null;
+  const split = X => { const I = X.map(Math.floor); return [I, X.map((x, i) => x - I[i])]; }, F = CELLS[id];
+  const [CI, CF] = split(mulM([P[0] * F[0], P[1] * F[1], P[2] * F[2]]).map((x, i) => x + S[i])), HI = [], HF = [];
+  for (let i = 0, f = 70; i < 5; i++, f *= 1.14) { if (i == 3) f = 30; let X = P.map(c => c * f); for (let j = 0; j < i; j++) X = mulM(X); const [I, R] = split(X.map((x, k) => x + S[k] + 4 * i)); HI.push(...I); HF.push(...R); }
+  return { t, id, P, n, g, rd, s0, CI, CF, PH: [1, 2, 0].map(i => 1.3 * CI[i] % TAU), HI, HF };
+}
 // Stem and leaf fall: one frame of them alone goes to a canvas of its own, laid exactly over the peach, and that topples off the bottom of the screen.
 function drop() {
   const [ox, oy] = see([.2, 1, .03]); // it turns about its own middle
   if (Math.abs(ox - .5) > 1 || Math.abs(oy - .5) > 1) return; // zoomed in on some other part of the peach: there would be nothing to see fall
-  gl.uniform1f(loc.ST, 2); paint();
+  gl.uniform1f(loc.ST, 2); gl.uniform1f(loc.DEEP, 0); paint();
   const r = peach.getBoundingClientRect(), box = document.body.appendChild(document.createElement('div')), c = box.appendChild(document.createElement('canvas'));
   c.width = peach.width; c.height = peach.height; c.getContext('2d').drawImage(peach, 0, 0);
   const side = Math.sign(see([.65, 1.26, 0])[0] - see([0, .87, 0])[0]) || 1, T = 1100; // it goes the way the leaf leans
@@ -1120,10 +1210,12 @@ function drop() {
 const pixel = new Uint8Array(4);
 // The view of the peach. zoom: 1 as the page shows it, more when it is zoomed in on. (cx, cy): the point of that normal picture, in the shader's units, that
 // lies at the middle of the peach's seat: (0, 0) in the normal view, and never further from it than still lets the picture close back to normal as zoom
-// falls to 1. zto: the zoom it is on its way to, about the point (zx, zy) of the screen. The furthest in it goes is where a pixel of the screen is a
-// hundred-thousandth of the peach's radius, which on a real peach would be about a third of a micron: finer than that, the GPU's arithmetic gives out.
-let zoom = 1, cx = 0, cy = 0, zto = 1, zx = 0, zy = 0;
-const zmax = () => lite ? 6 : glassy < 0 ? 40 : 2e5 / clamp(seat.clientWidth, 100, 420); // (without the fine detail there is nothing further in to see)
+// falls to 1. zto: the zoom it is on its way to, about the point (zx, zy) of the screen. A GPU's arithmetic can follow the surface down to where the
+// screen is some ten cells of the skin across (zdeep); further in, the script finds the middle of the screen for it (aim, deep), and the view goes on
+// to where a pixel is about a nine-millionth of the peach's radius: four nanometres or so on a real peach, where a membrane is a line two pixels thick.
+let zoom = 1, cx = 0, cy = 0, zto = 1, zx = 0, zy = 0, deep = false;
+const zmax = () => lite ? 6 : glassy < 0 ? 40 : 1.79e7 / clamp(seat.clientWidth, 100, 420); // (without the fine detail there is nothing further in to see)
+const zdeep = () => 197 * Math.max(W, H) / (seat.getBoundingClientRect().width || 1);
 const bound = () => { const m = 1 - 1 / zoom; cx = clamp(cx, -.8 * m, .8 * m); cy = clamp(cy, -.87 * m, .95 * m); }; // the picture's own edges: fruit, stem and leaf
 const uvAt = (x, y) => { const r = seat.getBoundingClientRect(), k = 2 / (r.width * zoom); return [cx + (x - r.left - r.width / 2) * k, cy + (r.top + r.height / 2 - y) * k]; }; // the point of the normal picture that shows at a point of the screen
 function zoomAt(z, x, y) { // zooms to z, keeping what shows at (x, y) on the screen where it is (as far as the picture's edges allow)
@@ -1131,13 +1223,12 @@ function zoomAt(z, x, y) { // zooms to z, keeping what shows at (x, y) on the sc
   const r = seat.getBoundingClientRect(), k = 2 / r.width * (1 / zoom - 1 / z);
   cx += (x - r.left - r.width / 2) * k; cy += (r.top + r.height / 2 - y) * k; zoom = z; bound();
 }
-function paint() {
+function look() { // the view, in the canvas's own pixels: its size, how much of the normal picture one pixel shows (u), and where the middle of that picture lies (vx, vy)
   const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, c = peach.getBoundingClientRect(), s = seat.getBoundingClientRect();
-  const k = h / (c.height || 1), u = 2 / ((s.height || 1) * k * zoom); // k: canvas pixels to a CSS pixel. u: how much of the normal picture one of them shows
-  gl.viewport(0, 0, w, h);
-  gl.uniform3f(loc.V, (s.left + s.width / 2 - c.left) * w / (c.width || 1) - cx / u, h - (s.top + s.height / 2 - c.top) * k - cy / u, u);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  const k = h / (c.height || 1), u = 2 / ((s.height || 1) * k * zoom); // k: canvas pixels to a CSS pixel
+  return { w, h, u, vx: (s.left + s.width / 2 - c.left) * w / (c.width || 1) - cx / u, vy: h - (s.top + s.height / 2 - c.top) * k - cy / u };
 }
+function paint() { const v = look(); gl.viewport(0, 0, v.w, v.h); gl.uniform3f(loc.V, v.vx, v.vy, v.u); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 // The peach can be taken hold of and turned, like a model in the hand. yaw and tilt are how far the visitor has turned and tipped it, on top of the half
 // turn a scene that scrolling gives it; vel is what a flick left it with; idle is its own slow turn, which waits (ramp) while it is handled and for a few
 // seconds after, and for as long as it is zoomed in on. pts: the fingers, or the mouse, that are down on it, and where each was last. held: the one that
@@ -1178,18 +1269,23 @@ function frame(ms) {
     if (view != seen) { seen = view; stirred = ms; }
     const calm = big && !feast && ms - stirred > 200, turn = big != stage.classList.contains('zoomed');
     if (turn) { stage.classList.toggle('zoomed', big); out.hidden = !big; } // into its seat, or out of it to fill the screen
-    if (big || turn) { fine = calm; fit(); const x = (zoom < 10 ? zoom.toFixed(1) : Math.round(zoom)) + '×'; if (mag.textContent != x) mag.textContent = x; }
+    if (big || turn) { fine = calm; fit(); const x = (zoom < 10 ? zoom.toFixed(1) : Math.round(zoom).toLocaleString('en')) + '×'; if (mag.textContent != x) mag.textContent = x; }
     if (!glassy && !lite && (big || kpc && timed >= 3)) { glass = make('#define FINE\n'); glassy = 1; } // the fine detail: begun here, and asked after every frame until it is built
     else if (glassy == 1 && (!kpc || gl.getProgramParameter(glass, kpc.COMPLETION_STATUS_KHR))) {
       if (gl.getProgramParameter(glass, gl.LINK_STATUS)) { locs[1] = where(glass); glassy = 2; sharp = false; } // (a picture at rest is drawn again, with it)
       else { console.warn(gl.getProgramInfoLog(glass)); glassy = -1; zto = Math.min(zto, zmax()); }
     }
     if (!(calm && sharp)) {
-      const lens = +(big && glassy == 2), [sx, sy, kx, ky] = [Math.sin(A[0]), Math.sin(A[1]), Math.cos(A[0]), Math.cos(A[1])];
+      const lens = +(big && glassy == 2), [sx, sy, kx, ky] = [Math.sin(A[0]), Math.sin(A[1]), Math.cos(A[0]), Math.cos(A[1])], Cm = [kx, 0, -sx, -sx * sy, ky, -kx * sy, sx * ky, sy, kx * ky];
       if (loc != locs[lens]) { gl.useProgram(lens ? glass : pr); loc = locs[lens]; } // zoomed in on, it is drawn with the fine detail, once there is any
-      gl.uniformMatrix3fv(loc.C, false, [kx, 0, -sx, -sx * sy, ky, -kx * sy, sx * ky, sy, kx * ky]); // tipped, then turned: worked out here, where the arithmetic is finer than a GPU's
+      gl.uniformMatrix3fv(loc.C, false, Cm); // tipped, then turned: worked out here, where the arithmetic is finer than a GPU's
       gl.uniform4fv(loc.B, bitesArr); gl.uniform4fv(loc.U, jawArr); gl.uniform4fv(loc.Z, Z); gl.uniform3fv(loc.S, S);
       gl.uniform1i(loc.NB, nb); gl.uniform1f(loc.GONE, gone);
+      let d = null; // further in than a float can follow: the middle of the screen, found here, and the shader works outwards from it
+      if (lens && zoom > zdeep()) { const v = look(); d = aim(Cm, (v.w / 2 - v.vx) * v.u, (v.h / 2 - v.vy) * v.u, nb, gone, st, 1.4 * v.u);
+        if (d) { gl.uniform2f(loc.RC, v.w / 2, v.h / 2); gl.uniform1f(loc.ID, d.id); gl.uniform1f(loc.T0, d.t); gl.uniform1f(loc.S0, d.s0); gl.uniform3fv(loc.P0, d.P); gl.uniform3fv(loc.N0, d.n); gl.uniform3fv(loc.G0, d.g);
+          gl.uniform3fv(loc.RD, d.rd); gl.uniform3fv(loc.CI, d.CI); gl.uniform3fv(loc.CF, d.CF); gl.uniform3fv(loc.PH, d.PH); gl.uniform3fv(loc.HI, d.HI); gl.uniform3fv(loc.HF, d.HF); } }
+      deep = !!d; gl.uniform1f(loc.DEEP, +deep);
       if (stood && !st && !gone && !still && peach.animate) drop(); // a bite has just taken the stem's footing; with reduced motion it simply goes
       stood = st; gl.uniform1f(loc.ST, st);
       const t0 = performance.now();
