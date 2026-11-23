@@ -677,7 +677,7 @@ uniform vec3 V;uniform mat3 C;uniform vec4 B[MAXB-1+FEAST],U[MAXB-1+FEAST],Z[3];
 // shader works outwards from that point: DEEP is 1 then. P0: the point of the peach that shows at the pixel RC, T0 along the ray RD (S0: that ray's
 // length before it was made a unit). N0: the way the surface faces there, G0: the same as nor() would have it. ID: what it is. Of the lattice of its
 // cells at P0, CI is the whole part and CF the rest, and PH where that puts the bend the lattice is given; HI and HF: the same for the layers of hairs.
-uniform float DEEP,ID,T0,S0,ID2,OP;uniform vec2 RC;uniform vec3 P0,N0,G0,RD,CI,CF,PH,HI[5],HF[5],D1,N1,G1,CI2,CF2,PH2;vec3 LI,LF,LP;
+uniform float DEEP,ID,T0,S0,ID2,OP;uniform vec2 RC;uniform vec3 P0,N0,G0,RD,CI,CF,PH,HI[5],HF[5],D1,N1,G1,CI2,CF2,PH2,TA,KA,TB,KB;vec3 LI,LF,LP;
 vec3 DP; // how far along the surface from P0 this pixel looks
 #endif
 #define TH .022 // how thick the skin is
@@ -1114,7 +1114,7 @@ void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,vec3 lm,inout v
     if(win>0.){                                                     // and further in still, what is inside them
       vec3 u2,v2,h2;vec4 w3;float under=cells(ci,x-nl*.3,u2,v2,h2,w3).x;vec4 I;
       if(id<.5||id>1.5&&id<3.5)I=inside(q,nl,ul,vec2(kx,k.x),w2,hc,um,a*um,id,c0,M*lm,under);else I=dead(q,nl,ul,kx,hc,um,a*um,id,c0,under);
-      c=mix(c,I.rgb,I.a*wc);sl*=1.-I.a*wc;
+      c=mix(c,I.rgb,I.a*wc);sl*=1.-I.a*wc;spe*=1.-I.a*wc; // (the view is focused under the surface by then: its slopes and its shine are out of the picture)
     }
   }
   if(id<.5){ // the fuzz, a layer at a time: three of fine underfur, then two of longer, stouter hairs over it. R turns each layer's cells, so that no two line up.
@@ -1134,23 +1134,33 @@ void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,vec3 lm,inout v
   }
 }
 #endif
+#ifdef FINE
+// Where a ray meets a surface that is all but flat. It leaves its flat (through o, as reckoned from P0, and facing n) by -(k.x*u*u+2.*k.y*u*v+k.z*v*v)/2,
+// u being measured along ta and v across it. t: how much further than T0 the ray goes to meet the flat and, on return, to meet the surface.
+// Returns how the surface's lie there differs from the flat's.
+vec3 curve(vec3 o,vec3 n,vec3 ta,vec3 k,vec3 dl,vec3 rd,inout float t){
+  vec3 tb=cross(n,ta),q=RD*t+dl*(T0+t)-o;vec2 uv=vec2(dot(q,ta),dot(q,tb)),ru=vec2(dot(rd,ta),dot(rd,tb)),w=uv;float dt=0.;
+  for(int i=0;i<2;i++){w=uv+ru*dt;dt=-.5*(k.x*w.x*w.x+2.*k.y*w.x*w.y+k.z*w.y*w.y)/dot(rd,n);}
+  t+=dt;w=uv+ru*dt;return (k.x*w.x+k.y*w.y)*ta+(k.y*w.x+k.z*w.y)*tb;
+}
+#endif
 vec2 sph(vec3 o,vec3 d,float r2){float b=dot(o,d),h=b*b-dot(o,o)+r2;return h<0.?vec2(1e3,-1e3):vec2(-b-sqrt(h),-b+sqrt(h));} // where a ray enters and leaves a sphere
 void main(){
   float px=1.4*V.z,t=0.,id=0.,halo=0.,a=1.; // px: a pixel's width on the peach
   vec3 rd,p,g,col,L=C*normalize(vec3(-.6,.7,.8)),up=C[1]; // everything happens in the peach's own frame, so camera, light and sky are turned into it
   bool hit=true; // a ray that runs out of steps is skimming a surface, and counts as having reached it
 #ifdef FINE
-  if(DEEP>.5){ // no feeling for the surface along a ray: it is the flat of the surface at P0, and this pixel's ray meets it DP from there
+  if(DEEP>.5){ // no feeling for the surface along a ray: it is the flat of the surface at P0, bent as the surface bends there, and this pixel's ray meets it DP from P0
     vec2 e2=(gl_FragCoord.xy-RC)*V.z;vec3 e=C[0]*e2.x+C[1]*e2.y;
     float ep=(2.*dot(RD,e)*S0+dot(e,e))/(S0*S0),k=sqrt(1.+ep);
     vec3 dl=(e-RD*(S0*ep/(1.+k)))/(S0*k); // how this pixel's ray differs from RD: all of it small numbers, so none of it is lost
     float t1=-T0*dot(dl,N0)/dot(N0,RD+dl); // how much further than T0 this pixel's ray has to go to meet that flat
-    rd=RD+dl;DP=RD*t1+dl*(T0+t1);g=G0;id=ID;LI=CI;LF=CF;LP=PH;
-    if(ID2>-.5){ // a second flat close by, where two parts of the peach meet (skin and the wall of a bite, stem and skin): it lies D1 from P0 and faces N1.
-      float dn=dot(N1,rd),t2=(dot(D1,N1)-T0*dot(dl,N1))/dn; // Where the two are one solid's faces (OP 1), a ray enters it at the further of them; where each is a solid of its own, at the nearer.
-      if(dn<0.&&(OP>.5?t2>t1:t2<t1)){DP=RD*t2+dl*(T0+t2);g=G1;id=ID2;LI=CI2;LF=CF2;LP=PH2;}
+    rd=RD+dl;vec3 gg=G0+curve(vec3(0.),N0,TA,KA,dl,rd,t1);DP=RD*t1+dl*(T0+t1);id=ID;LI=CI;LF=CF;LP=PH;
+    if(ID2>-.5){ // a second surface close by, where two parts of the peach meet (skin and the wall of a bite, stem and skin): its flat lies D1 from P0 and faces N1.
+      float dn=dot(N1,rd),t2=(dot(D1,N1)-T0*dot(dl,N1))/dn;vec3 g2=G1+curve(D1,N1,TB,KB,dl,rd,t2); // Where the two are one solid's faces (OP 1), a ray enters it at the further of them; where each is a solid of its own, at the nearer.
+      if(dn<0.&&(OP>.5?t2>t1:t2<t1)){DP=RD*t2+dl*(T0+t2);gg=g2;id=ID2;LI=CI2;LF=CF2;LP=PH2;}
     }
-    p=P0+DP;t=T0;
+    g=normalize(gg);p=P0+DP;t=T0;
   }else
 #endif
   {
@@ -1163,7 +1173,7 @@ void main(){
     halo=hit||id>.5?0.:1.-clamp(md/.016,0.,1.); // fuzz stands a little off the skin and softens its outline
     a=max(hit?1.:1.-smoothstep(0.,1.07*px,md),.3*halo*halo);
     if(a<=0.){gl_FragColor=vec4(0.);return;}
-    p=ro+rd*(hit?t:tm);g=nor(p,max(.5*px,.0008));
+    p=ro+rd*(hit?t:tm);g=nor(p,max(.5*px,.0002));
   }
   float spe=.3,shn=18.,fz=0.,sub=0.,wet=0.,cov=0.,mu=0.; // highlight strength and tightness, fuzz, how much light passes through, juice, blush; mu: see below
   if(id<.5){
@@ -1232,7 +1242,7 @@ function make(def) {
   gl.bindAttribLocation(p, 0, 'v'); gl.linkProgram(p); return p;
 }
 const build = () => pr = make(lite ? '#define LITE\n' : '');
-const where = p => Object.fromEntries(['V', 'C', 'B', 'U', 'Z', 'S', 'NB', 'ST', 'GONE', 'DEEP', 'ID', 'T0', 'S0', 'RC', 'P0', 'N0', 'G0', 'RD', 'CI', 'CF', 'PH', 'HI', 'HF', 'ID2', 'OP', 'D1', 'N1', 'G1', 'CI2', 'CF2', 'PH2'].map(n => [n, gl.getUniformLocation(p, n)]));
+const where = p => Object.fromEntries(['V', 'C', 'B', 'U', 'Z', 'S', 'NB', 'ST', 'GONE', 'DEEP', 'ID', 'T0', 'S0', 'RC', 'P0', 'N0', 'G0', 'RD', 'CI', 'CF', 'PH', 'HI', 'HF', 'ID2', 'OP', 'D1', 'N1', 'G1', 'CI2', 'CF2', 'PH2', 'TA', 'KA', 'TB', 'KB'].map(n => [n, gl.getUniformLocation(p, n)]));
 function noPeach() { // landscape + text still work
   gl = null; peach.hidden = seat.hidden = grip.hidden = spot.hidden = true; trivia.textContent = triviaText;
   const c = document.querySelector('.s p'); if (c) c.textContent = 'Scroll on.';
@@ -1343,9 +1353,9 @@ const see = P => { // where a point of the peach shows on its canvas, as fractio
 // to a millionth of a millionth, where on the peach the middle of the screen is looking, once it is zoomed in on further than a float can follow.
 // Whatever changes in the shader's shapes has to change here too (zoom.js compares the two by eye: the picture must not move where one takes over from the other).
 const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }, fr = x => x - Math.floor(x), TH = +FS.match(/#define TH ([\d.]+)/)[1];
-function sdBody(x, y, z) {
+function sdBody(x, y, z, side) { // side: 1 or -1 for the one cheek or the other on its own, carried on past the crease as if the other were not there (the body is whichever of the two reaches further)
   const e = Math.hypot(x * .93, y * .98, z * .96) - 1; if (e > .3) return e - .12;
-  const qy = y + 1, qz = z - .1, ch = Math.abs(x) - .45, a = 1 / (1 + (x * x + z * z) * 35), b = 1 / (1 + (x * x + qy * qy + qz * qz) * 45);
+  const qy = y + 1, qz = z - .1, ch = (side ? side * x : Math.abs(x)) - .45, a = 1 / (1 + (x * x + z * z) * 35), b = 1 / (1 + (x * x + qy * qy + qz * qz) * 45);
   const groove = Math.exp(-x * x * 32) * sstep(-.3, .5, z) * sstep(-1.2, .1, y), cavity = Math.exp(-(x * x + z * z) * 10) * sstep(.2, 1, y);
   return e + .1 * groove - (.07 + .012 * x) * Math.exp(-ch * ch * 6) * sstep(-.4, .6, z) + .12 * cavity + .03 * a * a * sstep(.4, 1, y) - .025 * b * b + .012 * Math.sin(x * 3 + S[0]) * Math.sin(y * 2.6 + z * 3.2 + S[1]);
 }
@@ -1384,11 +1394,12 @@ function shape(x, y, z, nb, gone, st) { // map(): [how far to the nearest of it,
   return [r, id];
 }
 // The same piece by piece, each as far as it goes on its own: body, the walls of the bites, stem, leaf, pit. (The whole is the nearest of: the further of
-// the first two, and each of the others.)
-function parts(x, y, z, nb, gone, st) {
-  const o = [1e3, -1e3, 1e3, 1e3, 1e3];
+// the first two, and each of the others.) The body is itself two pieces, a cheek either side of the crease that runs from stem to tip, and the crease is
+// sharp: a valley with flat sides, as near as this.
+function parts(x, y, z, nb, gone, st, side) { // (side: the cheek the body is to be taken as; the last part is then the other cheek)
+  const o = [1e3, -1e3, 1e3, 1e3, 1e3, 1e3];
   if (!gone) {
-    if (st < 1.5) { o[0] = sdBody(x, y, z); o[1] = sdBites(x, y, z, o[0], nb); }
+    if (st < 1.5) { o[0] = sdBody(x, y, z); o[1] = sdBites(x, y, z, o[0], nb); if (side) { o[0] = sdBody(x, y, z, side); o[5] = sdBody(x, y, z, -side); } }
     if (st > .5 && y > .6) { o[2] = sdStem(x, y, z); if (st > 1.5) o[2] = Math.max(o[2], .85 - y);
       const [lx, ly] = rot2(x - .36, y - 1.08, .55), q = [lx, ly, z - .06]; if (Math.hypot(lx, ly, q[2]) - .41 < .05) o[3] = sdLeaf(q); }
   }
@@ -1409,20 +1420,40 @@ function aim(Cm, uc, vc, nb, gone, st, px) {
   let t = 0, id = -1;
   for (let i = 0; i < 400 && id < 0; i++) { const [d, what] = shape(ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t, nb, gone, st); if (Math.abs(d) < 1e-13) id = what; else if ((t += d * .85) > 8) return null; }
   if (id < 0) return null;
-  const P = ro.map((o, i) => o + rd[i] * t), axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tet = [[1, -1, -1], [-1, -1, 1], [-1, 1, -1], [1, 1, 1]], e = Math.max(.5 * px, .0008);
-  const n = unit(axes.map(k => at(P, 1e-6, k) - at(P, -1e-6, k))), g = unit(tet.reduce((a, k) => { const d = at(P, e, k); return a.map((c, i) => c + k[i] * d); }, [0, 0, 0])); // the surface's true lie, and nor()'s
+  const P = ro.map((o, i) => o + rd[i] * t), axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tet = [[1, -1, -1], [-1, -1, 1], [-1, 1, -1], [1, 1, 1]], e = Math.max(.5 * px, .0002);
+  let n = unit(axes.map(k => at(P, 1e-6, k) - at(P, -1e-6, k))); const g = unit(tet.reduce((a, k) => { const d = at(P, e, k); return a.map((c, i) => c + k[i] * d); }, [0, 0, 0])); // the surface's true lie, and nor()'s
   if (-(n[0] * rd[0] + n[1] * rd[1] + n[2] * rd[2]) < .15) return null;
   const split = X => { const I = X.map(Math.floor); return [I, X.map((x, i) => x - I[i])]; }, lat = F => { const [I, R] = split(mulM([P[0] * F[0], P[1] * F[1], P[2] * F[2]]).map((x, i) => x + S[i])); return { CI: I, CF: R, PH: [1, 2, 0].map(i => 1.3 * I[i] % TAU) }; };
-  const { CI, CF, PH } = lat(CELLS[id]), HI = [], HF = [], K = [0, 2, 3, 1, 4][id], o = parts(P[0], P[1], P[2], nb, gone, st), reach = 1.5 * px * Math.hypot(gl.drawingBufferWidth, gl.drawingBufferHeight);
+  const { CI, CF, PH } = lat(CELLS[id]), HI = [], HF = [], K = [0, 2, 3, 1, 4][id], side = P[0] < 0 ? -1 : 1, reach = 1.5 * px * Math.hypot(gl.drawingBufferWidth, gl.drawingBufferHeight);
+  const part = (B, e, k) => parts(P[0] + k[0] * e, P[1] + k[1] * e, P[2] + k[2] * e, nb, gone, st, side)[B], lie = B => axes.map(k => (part(B, 1e-6, k) - part(B, -1e-6, k)) / 2e-6), o = parts(P[0], P[1], P[2], nb, gone, st, side);
+  const soft = (B, Q) => unit(tet.reduce((a, k) => { const d = parts(Q[0] + k[0] * e, Q[1] + k[1] * e, Q[2] + k[2] * e, nb, gone, st, side)[B]; return a.map((c, i) => c + k[i] * d); }, [0, 0, 0])); // nor()'s lie of one part by itself, at Q
+  if (!K && Math.abs(P[0]) < reach) n = unit(lie(0)); // on the crease, the lie of the cheek it is on, not of the two together
   let two = null; // the nearest other part, if it is near enough to come into the picture
-  for (const [B, op] of K < 2 ? [[1 - K, 1], [2, 0], [3, 0], [4, 0]] : [[o[0] >= o[1] ? 0 : 1, 0], ...[2, 3, 4].filter(i => i != K).map(i => [i, 0])]) {
+  for (const [B, op] of K < 2 ? [[1 - K, 1], [2, 0], [3, 0], [4, 0], ...(K ? [] : [[5, 0]])] : [[o[0] >= o[1] ? 0 : 1, 0], ...[2, 3, 4].filter(i => i != K).map(i => [i, 0])]) {
     if (Math.abs(o[B]) > 20 * reach) continue;
-    const G = axes.map(k => (parts(P[0] + k[0] * 1e-6, P[1] + k[1] * 1e-6, P[2] + k[2] * 1e-6, nb, gone, st)[B] - parts(P[0] - k[0] * 1e-6, P[1] - k[1] * 1e-6, P[2] - k[2] * 1e-6, nb, gone, st)[B]) / 2e-6), l = Math.hypot(...G) || 1, far = Math.abs(o[B]) / l;
-    if (far < reach && (!two || far < two.far) && (G[0] * rd[0] + G[1] * rd[1] + G[2] * rd[2]) / l < -.05) two = { far, op, id: [0, 3, 1, 2, 4][B], N: G.map(c => c / l), D: G.map(c => -c * o[B] / (l * l)), ...lat(CELLS[[0, 3, 1, 2, 4][B]]) };
+    const G = lie(B), l = Math.hypot(...G) || 1, far = Math.abs(o[B]) / l, what = [0, 3, 1, 2, 4, 0][B];
+    if (far < reach && (!two || far < two.far) && (G[0] * rd[0] + G[1] * rd[1] + G[2] * rd[2]) / l < -.01) two = { B, far, op, id: what, N: G.map(c => c / l), D: G.map(c => -c * o[B] / (l * l)), ...lat(CELLS[what]) };
   }
   for (let i = 0, f = 70; i < 5; i++, f *= 1.14) { if (i == 3) f = 30; let X = P.map(c => c * f); for (let j = 0; j < i; j++) X = mulM(X); const [I, R] = split(X.map((x, k) => x + S[k] + 4 * i)); HI.push(...I); HF.push(...R); }
-  return { t, id, P, n, g: two ? n : g, rd, s0, CI, CF, PH, HI, HF, two }; // (beside another part, the surface's own lie: nor() would round the two into each other)
+  // how a part's surface bends at Q, where it faces N: a direction along it, and for the shader's curve() how far it leaves its flat along that, across it, and both ways at once
+  const bend = (B, Q, N) => { const ta = unit(Math.abs(N[1]) < .9 ? [N[2], 0, -N[0]] : [0, -N[2], N[1]]), tb = cross(N, ta), h = 2e-4, f = (u, v) => parts(Q[0] + (ta[0] * u + tb[0] * v) * h, Q[1] + (ta[1] * u + tb[1] * v) * h, Q[2] + (ta[2] * u + tb[2] * v) * h, nb, gone, st, side)[B];
+    const f0 = f(0, 0), l = Math.hypot(...axes.map(k => (parts(Q[0] + k[0] * 1e-6, Q[1] + k[1] * 1e-6, Q[2] + k[2] * 1e-6, nb, gone, st, side)[B] - parts(Q[0] - k[0] * 1e-6, Q[1] - k[1] * 1e-6, Q[2] - k[2] * 1e-6, nb, gone, st, side)[B]) / 2e-6)) || 1, lim = v => clamp(v / (h * h * l), -80, 80);
+    return [ta, [lim(f(1, 0) - 2 * f0 + f(-1, 0)), lim((f(1, 1) - f(1, -1) - f(-1, 1) + f(-1, -1)) / 4), lim(f(0, 1) - 2 * f0 + f(0, -1))]]; };
+  if (two) { const Q = P.map((c, i) => c + two.D[i]); two.G = soft(two.B, Q); two.bend = bend(two.B, Q, two.N); }
+  return { t, id, P, n, g: two ? soft(K, P) : g, rd, s0, CI, CF, PH, HI, HF, two, bend: bend(K, P, n) }; // (beside another part, each part's lie by itself: nor() would round the two into each other)
 }
+// A drag is geared to the front of the peach: turned by as much as keeps the front under the finger. Zoomed in on, the finger may be on any part of it,
+// which turns in a circle of its own and is seen from its own angle; so there it is the very point under the finger that is kept under it.
+// beneath: the point of the peach under a point of the screen (nothing where there is none). shows: where a point of the peach shows in the picture, with
+// the peach turned a0 and tipped a1 (the shader's camera the other way round, as see() has it).
+function beneath(x, y) {
+  const [uc, vc] = uvAt(x, y), s0 = Math.hypot(uc, vc, 2.6), [sx, sy, kx, ky] = [Math.sin(A[0]), Math.sin(A[1]), Math.cos(A[0]), Math.cos(A[1])], Cm = [kx, 0, -sx, -sx * sy, ky, -kx * sy, sx * ky, sy, kx * ky];
+  const mulC = v => [0, 1, 2].map(i => Cm[i] * v[0] + Cm[3 + i] * v[1] + Cm[6 + i] * v[2]), ro = mulC([0, .1, 3.6]), rd = mulC([uc / s0, vc / s0, -2.6 / s0]);
+  const gone = !feast && bites.length >= MAXB, st = +(feast ? stem && taken <= stemTill : stem), nb = Math.min(bites.length, MAXB - 1) + (feast && taken);
+  for (let i = 0, t = 0; i < 300 && t < 8; i++) { const P = ro.map((o, j) => o + rd[j] * t), d = shape(P[0], P[1], P[2], nb, gone, st)[0]; if (Math.abs(d) < 1e-12) return P; t += d * .85; }
+  return null;
+}
+const shows = (P, a0, a1) => { let [x, y, z] = P; [x, z] = rot2(x, z, -a0); [y, z] = rot2(y, z, -a1); const k = 2.6 / (3.6 - z); return [x * k, (y - .1) * k]; };
 // Stem and leaf fall: one frame of them alone goes to a canvas of its own, laid exactly over the peach, and that topples off the bottom of the screen.
 function drop() {
   const [ox, oy] = see([.2, 1, .03]); // it turns about its own middle
@@ -1463,7 +1494,7 @@ function paint() { const v = look(); gl.viewport(0, 0, v.w, v.h); gl.uniform3f(l
 // turn a scene that scrolling gives it; vel is what a flick left it with; idle is its own slow turn, which waits (ramp) while it is handled and for a few
 // seconds after, and for as long as it is zoomed in on. pts: the fingers, or the mouse, that are down on it, and where each was last. held: the one that
 // is turning it, plus one. dragged: that hold has moved it, so was no tap. span, midX, midY: two fingers, how far apart they were and the point between them.
-let yaw = 0, tilt = 0, idle = 0, ramp = +!still, vel = 0, held = 0, dragged = false, moved = 0, lastT = 0, touched = -1e9, then = 0, span = 1, midX = 0, midY = 0;
+let yaw = 0, tilt = 0, idle = 0, ramp = +!still, vel = 0, held = 0, dragged = false, grab = null, drawn = 0, moved = 0, lastT = 0, touched = -1e9, then = 0, span = 1, midX = 0, midY = 0;
 const pts = new Map();
 // Zoomed in on, the peach fills the screen, and a frame of it can cost a GPU many times what the normal view does. So while the picture is changing it is
 // drawn with as few pixels as it takes to keep it moving; once it has stopped changing (calm) it is drawn once more with all the pixels a moment's work
@@ -1488,7 +1519,7 @@ function frame(ms) {
   pc += (p - pc) * e; pxc += (px - pxc) * e; pyc += (py - pyc) * e;
   if (!veiled) draw(t);
   if (gl && (ready || linked())) {
-    A = [pc * Math.PI + yaw + idle, tilt]; // half a turn per scene, as ever; the visitor's own turning and tipping; its slow turn of its own. (It no longer leans after the mouse, which can take hold of it now: the two fought. The landscape still does.)
+    A = [pc * Math.PI + yaw + idle, tilt]; drawn = yaw; // half a turn per scene, as ever; the visitor's own turning and tipping; its slow turn of its own. (It no longer leans after the mouse, which can take hold of it now: the two fought. The landscape still does.)
     if (feast) { // which of its bites are due by now?
       const k = Math.max(1, Math.floor((ms - feast) / BEAT) + 1);
       if (k > FEAST) { feast = 0; caption(); timed = 0; best = Infinity; } // over: only the pit is left, and that is cheap to draw, so time it again
@@ -1514,8 +1545,8 @@ function frame(ms) {
       let d = null; // further in than a float can follow: the middle of the screen, found here, and the shader works outwards from it
       if (lens && zoom > zdeep()) { const v = look(); d = aim(Cm, (v.w / 2 - v.vx) * v.u, (v.h / 2 - v.vy) * v.u, nb, gone, st, 1.4 * v.u);
         if (d) { gl.uniform2f(loc.RC, v.w / 2, v.h / 2); gl.uniform1f(loc.ID, d.id); gl.uniform1f(loc.T0, d.t); gl.uniform1f(loc.S0, d.s0); gl.uniform3fv(loc.P0, d.P); gl.uniform3fv(loc.N0, d.n); gl.uniform3fv(loc.G0, d.g);
-          gl.uniform3fv(loc.RD, d.rd); gl.uniform3fv(loc.CI, d.CI); gl.uniform3fv(loc.CF, d.CF); gl.uniform3fv(loc.PH, d.PH); gl.uniform3fv(loc.HI, d.HI); gl.uniform3fv(loc.HF, d.HF); gl.uniform1f(loc.ID2, d.two ? d.two.id : -1);
-          if (d.two) { gl.uniform1f(loc.OP, d.two.op); gl.uniform3fv(loc.D1, d.two.D); gl.uniform3fv(loc.N1, d.two.N); gl.uniform3fv(loc.G1, d.two.N); gl.uniform3fv(loc.CI2, d.two.CI); gl.uniform3fv(loc.CF2, d.two.CF); gl.uniform3fv(loc.PH2, d.two.PH); } } }
+          gl.uniform3fv(loc.RD, d.rd); gl.uniform3fv(loc.CI, d.CI); gl.uniform3fv(loc.CF, d.CF); gl.uniform3fv(loc.PH, d.PH); gl.uniform3fv(loc.HI, d.HI); gl.uniform3fv(loc.HF, d.HF); gl.uniform3fv(loc.TA, d.bend[0]); gl.uniform3fv(loc.KA, d.bend[1]); gl.uniform1f(loc.ID2, d.two ? d.two.id : -1);
+          if (d.two) { gl.uniform1f(loc.OP, d.two.op); gl.uniform3fv(loc.D1, d.two.D); gl.uniform3fv(loc.N1, d.two.N); gl.uniform3fv(loc.G1, d.two.G); gl.uniform3fv(loc.TB, d.two.bend[0]); gl.uniform3fv(loc.KB, d.two.bend[1]); gl.uniform3fv(loc.CI2, d.two.CI); gl.uniform3fv(loc.CF2, d.two.CF); gl.uniform3fv(loc.PH2, d.two.PH); } } }
       deep = !!d; gl.uniform1f(loc.DEEP, +deep);
       if (stood && !st && !gone && !still && peach.animate) drop(); // a bite has just taken the stem's footing; with reduced motion it simply goes
       stood = st; gl.uniform1f(loc.ST, st);
@@ -1585,6 +1616,7 @@ function down(e) {
   if (!pts.size) addEventListener('touchmove', hush, { passive: false }); // only while it is held: a listener like this slows every scroll it is there for
   const caught = zoom > 1 && vel != 0; // zoomed in on, a finger put down on a peach still turning from a flick only stops it: a bite there would take away what was being looked at
   pts.set(e.pointerId, [e.clientX, e.clientY]); vel = ramp = 0; lastT = e.timeStamp; touched = performance.now();
+  grab = zoom > 1 && ready ? beneath(e.clientX, e.clientY) : null; // zoomed in on, it is the point the finger is on that stays under it, not the front of the peach
   try { grip.setPointerCapture(e.pointerId); } catch (x) {} // the hold outlasts the finger sliding off the peach
   if (pts.size == 1) { held = e.pointerId + 1; dragged = caught; moved = 0; }
   else { held = 0; dragged = true; zto = zoom; two(); } // two fingers are no tap
@@ -1603,13 +1635,18 @@ grip.addEventListener('pointermove', e => {
   lastT = e.timeStamp;
   if (!dragged && (moved += Math.hypot(dx, dy)) < 6) return; // no more than a tap so far
   dragged = true; grip.classList.add('held');
-  const d = -dx * k; // k is also radians to a pixel: what keeps the front of the peach under the finger, however far in the view is
-  yaw += d; tilt = clamp(tilt + dy * k, -1.2, 1.2); vel += (d / dt - vel) * (1 - Math.exp(-dt * 20)); touched = performance.now();
+  let d = -dx * k, dt2 = dy * k; // k is also radians to a pixel: what keeps the front of the peach under the finger
+  if (grab) { // and for the point taken hold of: the turn and the tip that carry it as far across the picture as the finger has gone
+    const a0 = A[0] + yaw - drawn, e = 1e-5, at = (p, q) => shows(grab, a0 + p * e, tilt + q * e), [u1, v1] = at(1, 0), [u0, v0] = at(-1, 0), [u3, v3] = at(0, 1), [u2, v2] = at(0, -1);
+    const j = [(u1 - u0) / (2 * e), (u3 - u2) / (2 * e), (v1 - v0) / (2 * e), (v3 - v2) / (2 * e)], det = j[0] * j[3] - j[1] * j[2], w = sstep(1, 3, zoom);
+    if (Math.abs(det) > .02) { d += ((j[3] * dx * k + j[1] * dy * k) / det - d) * w; dt2 += ((-j[2] * dx * k - j[0] * dy * k) / det - dt2) * w; }
+  }
+  yaw += d; tilt = clamp(tilt + dt2, -1.2, 1.2); vel += (d / dt - vel) * (1 - Math.exp(-dt * 20)); touched = performance.now();
 });
 const release = e => {
   if (!pts.delete(e.pointerId)) return;
   touched = performance.now();
-  if (pts.size) { held = pts.keys().next().value + 1; lastT = e.timeStamp; vel = 0; return; } // one of two has let go: the other has hold of it still, and turns it
+  if (pts.size) { held = pts.keys().next().value + 1; lastT = e.timeStamp; vel = 0; const [x, y] = pts.values().next().value; grab = zoom > 1 && ready ? beneath(x, y) : null; return; } // one of two has let go: the other has hold of it still, and turns it by whatever it is on now
   held = 0; grip.classList.remove('held'); removeEventListener('touchmove', hush);
   vel = !dragged || still || e.type == 'pointercancel' || e.timeStamp - lastT > 80 ? 0 : clamp(vel, -14 / zoom, 14 / zoom); // let go while it is moving, and it keeps turning
 };
