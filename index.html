@@ -1058,7 +1058,7 @@ vec4 dead(vec3 q,vec3 nl,vec3 ul,float dw,vec3 r,float um,float A,float kind,vec
     float zone=sin(ro*31.+4.*w3.y+r.y*6.),lp=(ro*(230.+80.*r.z)+3.*w4.x+1.5*zone)/6.283,lam=fract(lp),lf=1.-smoothstep(.04,.13,A); // the wall's layers follow the hollow's round near it, and the cell's edges near them: broad ones, and in them fine ones
     vec3 gd=normalize(mix(Q/max(rq,1e-3),ul,ro)),td=normalize(cross(nl,gd)+1e-4);                          // gd: the way through the layers here, td: the way along them
     float hb=sin(dot(Q,td*.77+gd*.64*(mod(floor(lp),2.)*2.-1.))*210.+3.*sin(dot(Q,td)*40.))*(1.-smoothstep(.005,.014,A)); // the fibrils of each layer lie aslant, one layer's one way and the next's the other
-    c=mix(base*1.3,vec3(.9,.77,.52),.5)*(1.+.1*zone+.14*w3.x)*(1.+(.1*lam-.05)*lf-.1*hb-.12*dots(Q*23.+r,.3)*(1.-smoothstep(.01,.03,A)));
+    c=mix(base*1.3,vec3(.9,.77,.52),.3)*(1.+.1*zone+.14*w3.x)*(1.+(.1*lam-.05)*lf-.1*hb-.12*dots(Q*23.+r,.3)*(1.-smoothstep(.01,.03,A)));
     c*=1.-.22*lf*(1.-smoothstep(0.,.06,min(lam,1.-lam)));                                                  // (each fine layer darkens toward the next, and a line parts them)
     c=mix(c,base*.55,.85*line(d,.3,A));                                                                    // the middle lamella, where cell is glued to cell
     c=mix(c,base*.42,.85*can*edge(cw-cr,A));c=mix(c,base*.75,.6*can*line(cr-cw,.07,A)*(1.-smoothstep(.02,.1,A))); // the canals, and their lining
@@ -1086,7 +1086,7 @@ void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,vec3 lm,inout v
   else if(id<1.5){G=vec4(360.,5000.,.3,.3);F=vec3(520.,170.,520.);W=vec4(.06,.45,.6,.004);}    // bark: long cells, running up the stem
   else if(id<2.5){G=vec4(300.,6000.,.2,.25);F=vec3(650.);W=vec4(.04,.3,.5,.015);}              // leaf
   else if(id<3.5){G=vec4(1800.,9000.,.25,.2);F=vec3(260.);W=vec4(.03,.2,1.4,.045);}            // flesh: cells far bigger than the skin's, swollen with juice
-  else{G=vec4(360.,6000.,.35,.25);F=vec3(700.);W=vec4(.09,.5,.5,.004);}                        // stone: small cells, thick in the wall
+  else{G=vec4(360.,6000.,.35,.25);F=vec3(700.);W=vec4(.055,.42,.5,.004);}                        // stone: small cells, thick in the wall
   float m2=0.,fm=max(F.x,F.y),wc=fade(fm,px),um=id<.5?35.:id<1.5?67.:id<2.5?54.:id<3.5?135.:50.,win=1.-smoothstep(.2,1.2,px*fm*um); // um: how many microns across a cell is. win: how far the view has gone in past the cells' surface
   for(int i=0;i<2;i++){ // the grain: on the skin it is only colour, pigment gathered in clouds. (Grain finer than a cell is of the surface, and makes way for what is inside.)
     float f=i==0?G.x:G.y,k=i==0?G.z:G.w,w=fade(f,px)*(f*um<42000.?1.:1.-win);
@@ -1414,7 +1414,7 @@ function parts(x, y, z, nb, gone, st, side) { // (side: the cheek the body is to
 // are faces of one solid (op 1: the skin and a bite's wall) or two solids side by side (0).
 const mulM = v => [.36 * v[0] - .8 * v[1] + .48 * v[2], .48 * v[0] + .6 * v[1] + .64 * v[2], -.8 * v[0] + .6 * v[2]]; // the shader's M
 const CELLS = [[1000, 1000, 1000], [520, 170, 520], [650, 650, 650], [260, 260, 260], [700, 700, 700]]; // cells to a unit, by what it is: skin, bark, leaf, flesh, stone (fineness() has the same)
-function aim(Cm, uc, vc, nb, gone, st, px) {
+function aim(Cm, uc, vc, nb, gone, st, px, inward = 1) { // inward: how far the view has gone in past where these figures take over (0 there, 1 well past)
   const s0 = Math.hypot(uc, vc, 2.6), mulC = v => [0, 1, 2].map(i => Cm[i] * v[0] + Cm[3 + i] * v[1] + Cm[6 + i] * v[2]), ro = mulC([0, .1, 3.6]), rd = mulC([uc / s0, vc / s0, -2.6 / s0]);
   const at = (P, e, k) => shape(P[0] + k[0] * e, P[1] + k[1] * e, P[2] + k[2] * e, nb, gone, st)[0], unit = v => { const l = Math.hypot(...v) || 1; return v.map(c => c / l); };
   let t = 0, id = -1;
@@ -1432,15 +1432,21 @@ function aim(Cm, uc, vc, nb, gone, st, px) {
   for (const [B, op] of K < 2 ? [[1 - K, 1], [2, 0], [3, 0], [4, 0], ...(K ? [] : [[5, 0]])] : [[o[0] >= o[1] ? 0 : 1, 0], ...[2, 3, 4].filter(i => i != K).map(i => [i, 0])]) {
     if (Math.abs(o[B]) > 20 * reach) continue;
     const G = lie(B), l = Math.hypot(...G) || 1, far = Math.abs(o[B]) / l, what = [0, 3, 1, 2, 4, 0][B];
-    if (far < reach && (!two || far < two.far) && (G[0] * rd[0] + G[1] * rd[1] + G[2] * rd[2]) / l < -.01) two = { B, far, op, id: what, N: G.map(c => c / l), D: G.map(c => -c * o[B] / (l * l)), ...lat(CELLS[what]) };
+    if (far < reach && (!two || far < two.far && B < 5) && (G[0] * rd[0] + G[1] * rd[1] + G[2] * rd[2]) / l < -.01) two = { // (the other cheek comes last, and only if nothing else is near: the edge of another part matters more than the crease)
+       B, far, op, id: what, N: G.map(c => c / l), D: G.map(c => -c * o[B] / (l * l)), ...lat(CELLS[what]) };
   }
   for (let i = 0, f = 70; i < 5; i++, f *= 1.14) { if (i == 3) f = 30; let X = P.map(c => c * f); for (let j = 0; j < i; j++) X = mulM(X); const [I, R] = split(X.map((x, k) => x + S[k] + 4 * i)); HI.push(...I); HF.push(...R); }
   // how a part's surface bends at Q, where it faces N: a direction along it, and for the shader's curve() how far it leaves its flat along that, across it, and both ways at once
   const bend = (B, Q, N) => { const ta = unit(Math.abs(N[1]) < .9 ? [N[2], 0, -N[0]] : [0, -N[2], N[1]]), tb = cross(N, ta), h = 2e-4, f = (u, v) => parts(Q[0] + (ta[0] * u + tb[0] * v) * h, Q[1] + (ta[1] * u + tb[1] * v) * h, Q[2] + (ta[2] * u + tb[2] * v) * h, nb, gone, st, side)[B];
     const f0 = f(0, 0), l = Math.hypot(...axes.map(k => (parts(Q[0] + k[0] * 1e-6, Q[1] + k[1] * 1e-6, Q[2] + k[2] * 1e-6, nb, gone, st, side)[B] - parts(Q[0] - k[0] * 1e-6, Q[1] - k[1] * 1e-6, Q[2] - k[2] * 1e-6, nb, gone, st, side)[B]) / 2e-6)) || 1, lim = v => clamp(v / (h * h * l), -80, 80);
     return [ta, [lim(f(1, 0) - 2 * f0 + f(-1, 0)), lim((f(1, 1) - f(1, -1) - f(-1, 1) + f(-1, -1)) / 4), lim(f(0, 1) - 2 * f0 + f(0, -1))]]; };
-  if (two) { const Q = P.map((c, i) => c + two.D[i]); two.G = soft(two.B, Q); two.bend = bend(two.B, Q, two.N); }
-  return { t, id, P, n, g: two ? soft(K, P) : g, rd, s0, CI, CF, PH, HI, HF, two, bend: bend(K, P, n) }; // (beside another part, each part's lie by itself: nor() would round the two into each other)
+  let own = g; // how the surface is taken to face, for the light and for the plane the view is focused on
+  if (two) { const Q = P.map((c, i) => c + two.D[i]); own = soft(K, P); two.G = soft(two.B, Q); two.bend = bend(two.B, Q, two.N);
+    // The two cheeks are one skin, and the valley between them is shallow: once the view is in among the cells they are drawn as facing one way, half-way
+    // between the two at the crease and each cheek's own way by the time the crease has left the picture, or what is inside the cells would show a seam
+    // down it. (Each still lies where it lies: only what is drawn on it takes the common facing. And not at first, where the float's picture is to be met.)
+    if (two.B == 5 && inward) { const w = .5 * inward * clamp(1 - two.far / reach, 0, 1), G = two.G; two.G = unit(G.map((c, i) => c + (own[i] - c) * w)); own = unit(own.map((c, i) => c + (G[i] - c) * w)); } }
+  return { t, id, P, n, g: own, rd, s0, CI, CF, PH, HI, HF, two, bend: bend(K, P, n) }; // (beside another part, each part's lie by itself: nor() would round the two into each other)
 }
 // A drag is geared to the front of the peach: turned by as much as keeps the front under the finger. Zoomed in on, the finger may be on any part of it,
 // which turns in a circle of its own and is seen from its own angle; so there it is the very point under the finger that is kept under it.
@@ -1543,7 +1549,7 @@ function frame(ms) {
       gl.uniform4fv(loc.B, bitesArr); gl.uniform4fv(loc.U, jawArr); gl.uniform4fv(loc.Z, Z); gl.uniform3fv(loc.S, S);
       gl.uniform1i(loc.NB, nb); gl.uniform1f(loc.GONE, gone);
       let d = null; // further in than a float can follow: the middle of the screen, found here, and the shader works outwards from it
-      if (lens && zoom > zdeep()) { const v = look(); d = aim(Cm, (v.w / 2 - v.vx) * v.u, (v.h / 2 - v.vy) * v.u, nb, gone, st, 1.4 * v.u);
+      if (lens && zoom > zdeep()) { const v = look(); d = aim(Cm, (v.w / 2 - v.vx) * v.u, (v.h / 2 - v.vy) * v.u, nb, gone, st, 1.4 * v.u, sstep(1, 3, zoom / zdeep()));
         if (d) { gl.uniform2f(loc.RC, v.w / 2, v.h / 2); gl.uniform1f(loc.ID, d.id); gl.uniform1f(loc.T0, d.t); gl.uniform1f(loc.S0, d.s0); gl.uniform3fv(loc.P0, d.P); gl.uniform3fv(loc.N0, d.n); gl.uniform3fv(loc.G0, d.g);
           gl.uniform3fv(loc.RD, d.rd); gl.uniform3fv(loc.CI, d.CI); gl.uniform3fv(loc.CF, d.CF); gl.uniform3fv(loc.PH, d.PH); gl.uniform3fv(loc.HI, d.HI); gl.uniform3fv(loc.HF, d.HF); gl.uniform3fv(loc.TA, d.bend[0]); gl.uniform3fv(loc.KA, d.bend[1]); gl.uniform1f(loc.ID2, d.two ? d.two.id : -1);
           if (d.two) { gl.uniform1f(loc.OP, d.two.op); gl.uniform3fv(loc.D1, d.two.D); gl.uniform3fv(loc.N1, d.two.N); gl.uniform3fv(loc.G1, d.two.G); gl.uniform3fv(loc.TB, d.two.bend[0]); gl.uniform3fv(loc.KB, d.two.bend[1]); gl.uniform3fv(loc.CI2, d.two.CI); gl.uniform3fv(loc.CF2, d.two.CF); gl.uniform3fv(loc.PH2, d.two.PH); } } }
