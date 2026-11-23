@@ -866,18 +866,182 @@ float hair(vec3 ci,vec3 x,vec3 n,vec3 fl,float w,float a,float dn,out float k,ou
   return m;
 }
 // Cells: a sponge of them, cut through by the surface, at ci+x in their lattice. Returns how far it is to the nearest wall, and a number of the cell's own.
-// u: the way to that wall. m: the way to the cell's middle, and how far.
-vec2 cells(vec3 ci,vec3 x,out vec3 u,out vec3 m){
-  vec3 i=floor(x-.5),f=x-i,v1=vec3(0.),v2=vec3(0.);float d1=9.,d2=9.,id=0.;
+// u: the way to that wall. m: the way to the cell's middle, and how far. r: three more numbers of the cell's own.
+vec2 cells(vec3 ci,vec3 x,out vec3 u,out vec3 m,out vec3 r){
+  vec3 i=floor(x-.5),f=x-i,v1=vec3(0.),v2=vec3(0.);float d1=9.,d2=9.,id=0.;r=vec3(0.);
   for(int j=0;j<8;j++){ // the eight cells around: with their middles kept away from their edges, the nearest two are among them
     float fj=float(j);vec3 o=vec3(mod(fj,2.),mod(floor(fj*.5),2.),floor(fj*.25)),h=h3(ci+i+o),v=o+.2+.6*h-f;float d=dot(v,v);
-    if(d<d1){d2=d1;v2=v1;d1=d;v1=v;id=fract(h.x*57.+h.y*13.);}else if(d<d2){d2=d;v2=v;}
+    if(d<d1){d2=d1;v2=v1;d1=d;v1=v;r=h;id=fract(h.x*57.+h.y*13.);}else if(d<d2){d2=d;v2=v;}
   }
   m=v1;v2-=v1;float l=max(length(v2),1e-4);u=v2/l;
   return vec2((d2-d1)/(2.*l),id);
 }
+// Inside the cells. Further in than their surface, the view is what a microscope shows focused just under it: each cell seen through its outer wall,
+// which is as clear as glass; the layer of cytoplasm spread under that wall, with the bodies that live in it; and behind the cytoplasm the vacuole, which
+// is most of the cell and holds its colour. The plane in focus lies a micron down: a body it passes through shows what is in it, one lying deeper
+// shows its outside, dimmer. Between the cells their side walls are seen cut through. Lengths are in microns from here on (a cell of the skin is 35 across).
+float line(float d,float w,float a){return clamp((.5*(w+a)-abs(d))/a,0.,min(1.,w/a));} // a stripe w wide about d=0: how much of a pixel a wide it covers
+float edge(float d,float a){return clamp(d/a+.5,0.,1.);}                               // and the same for everything on the side where d>0
+float mem(float d,float A){return mix(line(d,.011,A),line(abs(d)-.0028,.0024,A),1.-smoothstep(.0012,.0035,A));} // a membrane at d=0: a dark line, and from close to, the two leaflets it is made of
+// The nearest body, of a lattice of them, that the plane in focus passes through or that lies under it. X: the point in focus (zf under the outer wall),
+// from the cell's middle. nl: the way the outer wall faces. g: how far apart the lattice puts them. rr: their radii, lying flat under the wall; with
+// sm set they are the small bodies, each of its own kind and shape (see inside). dq: how far X is from the cell's side wall, uw: the way to it.
+// few: how many places of the lattice are empty. sd: tells this lattice, in this cell, from any other. A: a pixel.
+// Returns how far under the plane the body lies (0 where it is cut through, -1 for none). e: the point seen, with the body taken as a ball of radius 1;
+// nb: the way the top of it faces above that point (for the lamp: a body cut through is still lit as the round thing it is); h: numbers of the body's
+// own; rs: its radii; rim: how far inside its outline that is, in pixels; near: how close by a body is, for one that is missed (1 at its outline, 0 a
+// third of a micron off).
+float body3(vec3 X,vec3 nl,vec3 uw,float dq,float zf,float g,vec3 rr,bool sm,float few,vec3 sd,float A,out vec3 e,out vec3 nb,out vec3 h,out vec3 rs,out float rim,out float near){
+  vec3 i=floor(X/g-.5);float best=-1.;e=nb=h=rs=vec3(0.);rim=near=0.;
+  for(int j=0;j<8;j++){
+    float fj=float(j);vec3 o=vec3(mod(fj,2.),mod(floor(fj*.5),2.),floor(fj*.25)),hh=h3(i+o+sd),c=(i+o+.2+.6*hh)*g,E=X-c,r1=rr;
+    if(sm)r1=hh.z<.5?vec3(.6+.9*hh.x,.28,.28):hh.z<.75?vec3(.2,.5,.5):vec3(.4); // a mitochondrion (some of them long), a Golgi stack on its side, or a peroxisome
+    else r1*=.75+.5*hh.x;
+    float zc=zf+dot(E,nl); // how deep under the outer wall its middle lies
+    if(zc<r1.z+.04||zc>r1.z+1.3||dq+dot(E,uw)<r1.x*.7+.3||fract(hh.y*7.31)<few)continue; // it must lie in the cytoplasm, and clear of the side wall
+    vec3 a1=normalize(cross(nl,hh-.5+vec3(.013,.007,.011))),a2=cross(nl,a1);
+    vec3 ee=vec3(dot(E,a1),dot(E,a2),dot(E,nl))/r1,dd=-vec3(0.,0.,1.)/r1;
+    float e2=dot(ee,ee),t=0.,b=dot(ee,dd),a=dot(dd,dd),far=e2,rm=min(r1.x,r1.y); // far: how far from its middle the line of sight passes, squared
+    if(e2>=1.){far=e2-b*b/a;if(b>0.)continue;near=max(near,1.-smoothstep(0.,.33,(sqrt(far)-1.)*rm));if(far>=1.)continue;t=(-b-sqrt(b*b-a*(e2-1.)))/a;}
+    if(best<0.||t<best){best=t;e=ee+dd*t;vec3 et=t>0.?e:vec3(ee.xy,sqrt(max(0.,1.-dot(ee.xy,ee.xy))));nb=normalize(a1*et.x/r1.x+a2*et.y/r1.y+nl*et.z/r1.z);h=hh;rs=r1;rim=(1.-sqrt(far))*rm/A;}
+  }
+  return best;
+}
+// kind: 0 skin, 2 leaf, 3 flesh. q: where in the cell, from its middle, in cells; um: how many microns the cell is across; dw: how far to the nearest wall
+// and ul the way to it; r: numbers of the cell's own; A: a pixel, in microns; base: the cell's colour as it shows from outside; lm: the lamp;
+// under: how far to the nearest wall in the layer of cells beneath. Returns the colour of what is seen, and how much of the surface it takes the place of.
+vec4 inside(vec3 q,vec3 nl,vec3 ul,float dw,vec3 r,float um,float A,float kind,vec3 base,vec3 lm,float under){
+  float win=1.-smoothstep(.2,1.2,A);if(win<=0.)return vec4(0.);
+  bool leafy=kind>1.5&&kind<2.5,fleshy=kind>2.5;
+  float sn=sqrt(max(1.-dot(ul,nl)*dot(ul,nl),.0025)),d=dw*um/sn,zf=.9,wh=fleshy?.22:.3; // d: how far it is, along the surface, to the cell's side wall. zf: how deep the plane in focus lies. wh: half that wall's thickness
+  vec3 uw=(ul-nl*dot(ul,nl))/sn,Q=q*um,X=Q-nl*(dot(Q,nl)+zf),t1=cross(nl,uw);   // uw: the way to the side wall, along the surface. X: the point in focus, from the cell's middle as it lies in plan. t1: along the side wall
+  vec3 w3=vn3(X*.25+r*17.)-.5,w4=vn3(X*1.3+r*5.)-.5;                            // slow and quicker wanderings
+  float tc=(fleshy?1.1:leafy?2.6:1.5)*(1.+1.2*w3.x+.6*w4.x)+.6*(1.-smoothstep(0.,2.5,d)); // how thick the cytoplasm lies here: it wanders, and gathers along the side walls
+  vec3 vac=base*(1.+.08*w3.y)*(1.-.2*(1.-smoothstep(0.,.07,under)));if(leafy)vac=mix(vac,vec3(.84,.92,.76),.5); // the vacuole, with the walls of the cells beneath showing dimly through it
+  vec3 k9=vn3(X*9.+r*3.),cyt=mix(vac,vec3(.95,.93,.87),fleshy?.2:.26)*(1.+.07*w4.y+.05*(k9.x-.5)*(1.-smoothstep(.03,.2,A)));   // and the same seen through cytoplasm, which is all but clear, and grainy
+  cyt*=1.+.07*smoothstep(.55,.8,vn3(X*.55+r*3.).z)-.06*smoothstep(.6,.85,w4.z+.5);                                             // (with the blur of what lies deeper in it)
+  float inC=smoothstep(-.3,.3,tc-zf),inW=edge(wh-d,A);
+  // the nucleus: a ball, bigger than the cytoplasm is deep, so that it bulges down into the vacuole; the cytoplasm gathers round it
+  vec3 pn=(r-.5)*.3*um;float Rn=fleshy?4.2:leafy?2.8:3.3;vec3 En=X-(pn-nl*(dot(pn,nl)+.75*Rn+.4));float bn=dot(En,nl),n2=dot(En,En);
+  bool nuc=d+dot(En,uw)>Rn+wh; // (and clear of the side wall, or this cell has none to show)
+  if(nuc)inC=max(inC,1.-smoothstep(Rn*.8,Rn*.8+1.6,length(En-nl*bn)));
+  // the bodies: plastids first, then the small ones
+  vec3 e[2],nb[2],h[2],rs[2];float t[2],rim[2],nr,shade=0.;
+  for(int L=0;L<2;L++){
+    bool big=L==0;
+    t[L]=body3(X,nl,uw,d,zf,big?(leafy?4.4:fleshy?5.6:6.):2.1,leafy?vec3(2.1,2.1,.95):fleshy?vec3(1.3,1.3,.7):vec3(1.6,1.6,.8),!big,big?(leafy?.03:.3):fleshy?.5:.2,r*31.+float(L)*7.,A,e[L],nb[L],h[L],rs[L],rim[L],nr);
+    inC=max(inC,max(nr,t[L]<0.?0.:1.));shade=max(shade,nr);
+  }
+  vec3 c=mix(vac*.94,cyt,inC)*(1.-.2*shade),med=c,hv=normalize(lm+nl); // (each body darkens what is round it a little); med: what the bodies lie in, here; hv: where a gleam shows
+  // the fine things of the cytoplasm: the endoplasmic reticulum, a sheet folded all through it; ribosomes; vesicles; under the cell's membrane, microtubules
+  if(inC>0.&&A<.25){
+    vec3 G=X*5.5+7.*w3+2.5*w4+1.2*k9;float gy=dot(sin(G),cos(G.yzx))*.11,er=smoothstep(-.12,.12,w3.y+.6*w4.x),rough=smoothstep(-.15,.1,w3.z),far=1.-smoothstep(.1,.25,A),nearer=1.-smoothstep(.006,.02,A);
+    c=mix(c,vec3(.78,.8,.86),.42*line(gy,.055,A)*far*er*inC);                                              // the reticulum's sheet (there is more of it in some places than others),
+    c=mix(c,c*.62,.75*mem(abs(gy)-.025,A)*nearer*er*inC);                                                  // and from close to, the two membranes it is made of
+    c=mix(c,vec3(.3,.26,.28),.75*dots(X*17.+r*5.,.4+.5*rough*er*(1.-smoothstep(.03,.07,abs(gy))))*(1.-smoothstep(.008,.025,A))*inC); // ribosomes: free in the cytoplasm, and thick on the rough stretches of the reticulum
+    c*=1.-.1*dots(X*70.+r*11.,.7)*(1.-smoothstep(.002,.006,A))*inC;                                                                 // and all between them, the crowd of proteins the cytoplasm is thick with
+    vec3 vq=X*2.6+r*3.,vh=h3(floor(vq));float vr=length(fract(vq)-.3-.4*vh)/2.6-.04-.05*vh.x,vm=step(vh.y,.35)*inC*(1.-smoothstep(.03,.08,A));
+    c=mix(c,vec3(.97,.95,.9),.55*edge(-vr,A)*vm);c=mix(c,c*.6,.8*mem(vr,A)*vm);                             // vesicles: little bags, 80 to 180 nm across
+    vec3 fd=normalize(cross(nl,sin(floor(X*.4+r*9.)*7.+r*40.)));                                            // actin: fine cables, each stretch of cytoplasm with its own run of them
+    c=mix(c,vec3(.56,.5,.42),.5*line((fract(dot(X,cross(nl,fd))*3.+w4.x)-.5)/3.,.008,A)*nearer*inC*step(.3,fract(dot(floor(X*.4+r*9.),vec3(.37,.71,.53)))));
+  }
+  c=mix(c,c*.7,.6*mem((tc-zf)*.7,A)*(1.-inW)*(1.-smoothstep(.01,.05,A))*step(shade,.01)*(nuc?smoothstep(Rn*.8,Rn*.8+1.6,length(En-nl*bn)):1.)); // where the cytoplasm thins away under the plane in focus, the vacuole's own membrane
+  for(int L=0;L<2;L++){
+    if(t[L]<0.)continue;
+    bool big=L==0;vec3 ee=e[L],hh=h[L],rr=rs[L],bc;
+    float tt=t[L],soft=1.+2.5*tt,al=edge(rim[L]/soft,1.)*(1.-inW),e1=length(ee),lt=.62+.46*clamp(dot(nb[L],lm),0.,1.),rm=min(rr.x,rr.y),env=mem((1.-e1)*rm,A)*(1.-smoothstep(.01,.05,A)),gl=pow(clamp(dot(nb[L],hv),0.,1.),40.);
+    if(big){ // a plastid: in a leaf a chloroplast, green, with its grana in stacks; in the fruit a chromoplast, orange, with droplets of oil
+      vec3 st=leafy?vec3(.42,.66,.24):vec3(1.,.66,.2);
+      if(tt>0.)bc=st*lt;
+      else{
+        vec2 gp=ee.xy*rr.xy*(leafy?2.2:3.1)+hh.xy*9.;vec3 gh=h3(vec3(floor(gp),hh.z*91.));float gr=length(fract(gp)-.3-.4*gh.xy),z=ee.z*rr.z,gz=abs(z-(gh.z-.5)*.9); // grana, or droplets: scattered in the plane the plastid lies in
+        bc=st*(1.-.14*e1*e1)*(1.+.12*w4.z);
+        if(leafy){
+          float gm=edge(.3-gr,A*2.2)*edge(.25-gz,A)*step(gh.z,.8);
+          bc=mix(bc,vec3(.24,.5,.18),.5*line(sin(z*21.+gp.x*.7)*.05,.012,A)*(1.-smoothstep(.02,.06,A)));               // the lamellae that run from granum to granum
+          bc=mix(bc,vec3(.13,.36,.12),.85*gm*(1.-.4*(1.-smoothstep(.004,.012,A))*(.5+.5*sin(z*628.))));                 // each granum a stack of discs, 10 nm to a membrane
+          bc=mix(bc,vec3(.97,.97,.92),edge(1.-length((ee.xy-(hh.xy-.5)*.5)*rr.xy/vec2(.75,.45)),A*1.6)*step(hh.x,.6)*step(abs(z),.3)); // a grain of starch
+        }else{
+          bc=mix(bc,vec3(.93,.36,.05),.85*edge(.16+.1*gh.x-gr,A*3.1)*step(gz,.3));                                      // droplets of carotene
+          bc=mix(bc,st*.62,.5*line(sin(length(ee.xy)*rr.x*30.+hh.y*6.)*.033,.014,A)*(1.-smoothstep(.01,.04,A)));        // and the whorls of membrane left from when it was green
+        }
+        bc=mix(bc,st*.45,.8*max(env,.6*mem((1.-e1)*rm-.02,A)*(1.-smoothstep(.002,.006,A)))); // its envelope: two membranes
+      }
+    }else if(hh.z<.5){ // a mitochondrion: the inner of its two membranes folded into cristae, which reach across from either side in turn
+      vec3 st=vec3(.88,.72,.63);
+      if(tt>0.)bc=st*lt;
+      else{
+        float s1=ee.x*rr.x,sd=sin(s1*26.+hh.x*6.)>0.?1.:-1.,ph=sin(s1*52.+3.*sin(ee.y*4.+hh.x*6.))*.019,on=(1.-smoothstep(.62,.9,e1))*step(-.45,ee.y*sd);
+        bc=st*(1.-.1*e1)*(1.-.2*dots(vec3(ee.x*rr.x,ee.yz*rr.y)*24.+hh,.4)*(1.-smoothstep(.006,.02,A)));               // its matrix, with granules
+        bc=mix(bc,vec3(.95,.86,.8),.7*line(ph,.02,A)*on*(1.-smoothstep(.02,.06,A)));                                    // the cristae: pale within,
+        bc=mix(bc,vec3(.5,.28,.26),.8*mem(abs(ph)-.011,A)*on*(1.-smoothstep(.01,.04,A)));                               // between membranes
+        bc=mix(bc,vec3(.5,.28,.26),.8*max(env,mem((1.-e1)*rm-.018,A)*(1.-smoothstep(.002,.006,A))));                     // and its two membranes round all
+      }
+    }else if(hh.z<.75){ // a Golgi stack, seen from the side: half a dozen flat cisternae one on another
+      float z=ee.x*rr.x,zz=(fract(z/.066+.5)-.5)*.066,in2=step(length(ee.yz),.97-.45*abs(ee.x));
+      bc=tt>0.?vec3(.84,.7,.42)*lt:mix(mix(med,vec3(.9,.8,.56),.8*line(zz,.03,A)*in2),vec3(.5,.38,.2),.8*mem(abs(zz)-.015,A)*in2*(1.-smoothstep(.006,.03,A)));
+    }else{ // a peroxisome: one membrane round a grainy matrix, sometimes with a crystal at its heart
+      bc=vec3(.78,.84,.76)*(tt>0.?lt:1.-.15*e1);
+      if(tt<=0.){bc=mix(bc,vec3(.46,.58,.52),.8*edge((.3-max(abs(ee.x),max(abs(ee.y),abs(ee.z))))*rm,A)*step(hh.x,.5));bc=mix(bc,vec3(.4,.5,.44),.8*env);}
+    }
+    if(tt<=0.)bc=bc*(.8+.3*clamp(dot(nb[L],lm),0.,1.))*(1.-.3*smoothstep(.7,1.,e1)); // cut through, it is lit all the same as the round thing it is, and darker toward its edge
+    c=mix(c,mix(bc,med,.5*smoothstep(0.,1.2,tt))+.3*gl,al); // sunk in whatever lies over it, the deeper the dimmer and the softer; and a gleam where the lamp catches it
+  }
+  if(nuc){
+    float ds=bn*bn-n2+Rn*Rn;bool cut=n2<Rn*Rn;
+    if(cut||ds>0.&&bn>0.){
+      float tt=cut?0.:bn-sqrt(ds),al=edge((Rn-sqrt(cut?n2:n2-bn*bn))/A,1.+tt)*(1.-inW);
+      vec3 en=(En-nl*tt)/Rn,nc=vec3(.87,.86,.88),tp=cut?normalize(vec3(0.)+(En-nl*bn)/Rn+nl*sqrt(max(0.,1.-(n2-bn*bn)/(Rn*Rn)))):en;float rho=length(en),ltn=.62+.46*clamp(dot(tp,lm),0.,1.);
+      if(!cut)nc*=ltn;
+      else{
+        vec3 k1=vn3(en*3.3+r*7.),k2=vn3(en*9.+r*3.),eo=en-(r.zxy-.5)*.5;float ch=.6*k1.x+.4*k2.y+.22*smoothstep(.72,1.,rho),no=length(eo)/.3,ev=(1.-rho)*Rn,nearer=1.-smoothstep(.006,.02,A);
+        nc=mix(nc,vec3(.64,.61,.72),.8*smoothstep(.5,.7,ch));                                    // chromatin, densest against the envelope
+        nc=mix(nc,vec3(.4,.36,.5)*(1.+.5*k2.z*step(no,.8)),edge((1.-no)*Rn*.3,A));               // the nucleolus
+        nc*=1.-.25*dots(en*40.+r,.5)*(1.-smoothstep(.01,.03,A));                                 // the grain of it all
+        float pr=sin(atan(en.y,en.x)*46.)*sin(acos(clamp(en.z/max(rho,1e-3),-1.,1.))*46.);       // the pores through its envelope, which is two membranes
+        nc=mix(nc,vec3(.45,.42,.55),.7*mix(line(ev,.05,A)*(1.-smoothstep(.02,.2,A)),max(mem(ev,A),mem(ev-.035,A))*(1.-.85*smoothstep(.2,.6,pr)),nearer));
+        nc*=(.8+.3*clamp(dot(tp,lm),0.,1.))*(1.-.25*smoothstep(.75,1.,sqrt((n2-bn*bn))/Rn));
+      }
+      c=mix(c,mix(nc,med,.5*smoothstep(0.,2.5,tt))+.25*pow(clamp(dot(tp,hv),0.,1.),40.),al);
+    }
+  }
+  // the side wall, cut through: layer on layer of cellulose fibrils, each layer lying its own way; the middle lamella that glues it to the next cell's; and through it, plasmodesmata
+  if(inW>0.){
+    float la=floor(d/.07+.5)*2.4+r.x*6.,fs=1.-smoothstep(.003,.009,A);
+    vec3 wc=vec3(.95,.92,.82)*(1.+.05*w4.z-.12*fs*sin(dot(X,t1*cos(la)+nl*sin(la))*390.+3.*sin(dot(X,t1)*40.))-.07*sin(d*90.)*(1.-smoothstep(.015,.04,A)));
+    wc=mix(wc,vec3(.8,.7,.5),.7*line(d,.06,A)); // the middle lamella
+    vec2 pq=vec2(dot(X,t1),dot(X,nl))*1.6;vec3 ph=h3(vec3(floor(pq),r.y*53.));
+    wc=mix(wc,vec3(.45,.4,.38),.8*edge(.025-length(fract(pq)-.3-.4*ph.xy)/1.6,A)*step(ph.z,.5)*(1.-smoothstep(.01,.03,A))); // plasmodesmata: threads of cytoplasm from cell to cell
+    c=mix(c,wc,inW);c=mix(c,vec3(.4,.34,.3),.75*mem(d-wh,A)*(1.-smoothstep(.02,.08,A))); // and against its inner face, the cell's own membrane
+  }
+  return vec4(c,win);
+}
+// The dead tissues, cut through: there is nothing in them but wall. In the stone (kind 4) each cell is a sclereid: its wall was laid down layer on layer
+// until all that was left of the cell was a small hollow at its middle, and fine canals running out from that to the neighbours. In the bark (kind 1)
+// the cells are cork: empty boxes, their thin walls proofed with suberin, here and there a clot of tannin left in one. (The arguments are inside()'s.)
+vec4 dead(vec3 q,vec3 nl,vec3 ul,float dw,vec3 r,float um,float A,float kind,float under){
+  float win=1.-smoothstep(.2,1.2,A);if(win<=0.)return vec4(0.);
+  vec3 Q=q*um,w3=vn3(Q*.3+r*17.)-.5,w4=vn3(Q*1.6+r*5.)-.5,t1=normalize(cross(ul,vec3(.31,.89,.33))),t2=cross(ul,t1),c;
+  float d=dw*um,rq=length(Q),la=floor(d/.07+.5)*2.4+r.x*6.,fb=sin(dot(Q,t1*cos(la)+t2*sin(la))*390.+3.*sin(dot(Q,t2)*40.))*(1.-smoothstep(.003,.009,A)),nearer=1.-smoothstep(.01,.03,A); // fb: cellulose fibrils, lying a different way in each layer of the wall
+  if(kind>3.5){
+    float Rl=(.08+.11*r.x)*um*(1.+.4*w4.x),lum=edge(Rl-rq,A);vec3 dq=Q/max(rq,1e-3)*4.+r*7.,di=floor(dq),dh=h3(di),dc=normalize(di+.3+.4*dh-r*7.); // Rl: the hollow's radius. dc: the canal that runs out nearest this way
+    float can=edge(.28+.3*dh.x-length(Q-dc*dot(Q,dc)),A)*step(dh.y,.7)*step(0.,dot(Q,dc))*(1.-lum);
+    c=mix(vec3(.86,.7,.44),vec3(.7,.52,.3),.5+.5*sin(d*7.+3.*w4.y+r.y*6.))*(1.+.1*w3.x)*(1.-.08*sin(d*105.)*nearer-.1*fb); // the wall: its layers, the finer layers in them, and the fibrils in those
+    c=mix(c,vec3(.4,.27,.15),.85*line(d,.3,A));                                                                           // the middle lamella, where cell is glued to cell
+    c=mix(c,vec3(.3,.2,.12),.85*can);                                                                                     // the canals
+    c=mix(c,mix(vec3(.2,.13,.08),vec3(.5,.24,.12),smoothstep(-.1,.3,w3.z+.5*w4.y)),lum);                                  // the hollow, and what was the living cell, dried in it
+    c=mix(c,vec3(.26,.17,.1),.8*line(rq-Rl,.12,A));
+  }else{
+    float wh=.4,inW=edge(wh-d,A);
+    c=mix(vec3(.19,.12,.08),vec3(.46,.33,.22),exp(-max(d-wh,0.)*.3))*(1.-.3*(1.-smoothstep(0.,.07,under)));               // an empty box: what shows is the dark of it, and dimly the walls of the box beneath
+    c=mix(c,vec3(.42,.15,.07)*(1.+.3*w4.z),smoothstep(.12,.2,w3.x+.5*w4.x+.35*r.y-.2)*(1.-inW));                          // a clot of tannin
+    c=mix(c,mix(vec3(.7,.5,.29),vec3(.55,.37,.2),.5+.5*sin(d*16.))*(1.-.1*fb-.08*sin(d*900.)*(1.-smoothstep(.002,.005,A))),inW); // the wall, and the leaves of suberin in it
+    c=mix(c,vec3(.36,.24,.13),.8*line(d,.08,A));
+  }
+  return vec4(c,win);
+}
 // id: what it is (as map gives it), cov: how blushed and fz: how fuzzy, if it is skin. px: a pixel's width, allowing for how the surface faces.
-void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,inout vec3 c,inout vec3 sl,inout float spe){
+void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,vec3 lm,inout vec3 c,inout vec3 sl,inout float spe){
   // G: its grain, at two sizes (how many to a unit) and how strong each. F: its cells (how many to a unit, each way).
   // W: half the thickness of their walls, how dark those are, and how far each cell bulges.
   vec4 G;vec3 F,W;
@@ -886,18 +1050,18 @@ void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,inout vec3 c,in
   else if(id<2.5){G=vec4(300.,6000.,.2,.25);F=vec3(650.);W=vec3(.04,.3,.5);}              // leaf
   else if(id<3.5){G=vec4(1800.,9000.,.25,.2);F=vec3(260.);W=vec3(.03,.2,1.4);}            // flesh: cells far bigger than the skin's, swollen with juice
   else{G=vec4(360.,6000.,.35,.25);F=vec3(700.);W=vec3(.09,.5,.5);}                        // stone: small cells, thick in the wall
-  float m2=0.,fm=max(F.x,F.y),wc=fade(fm,px);
-  for(int i=0;i<2;i++){ // the grain: on the skin it is only colour, pigment gathered in clouds
-    float f=i==0?G.x:G.y,k=i==0?G.z:G.w,w=fade(f,px);
+  float m2=0.,fm=max(F.x,F.y),wc=fade(fm,px),um=id<.5?35.:id<1.5?67.:id<2.5?54.:id<3.5?135.:50.,win=1.-smoothstep(.2,1.2,px*fm*um); // um: how many microns across a cell is. win: how far the view has gone in past the cells' surface
+  for(int i=0;i<2;i++){ // the grain: on the skin it is only colour, pigment gathered in clouds. (Grain finer than a cell is of the surface, and makes way for what is inside.)
+    float f=i==0?G.x:G.y,k=i==0?G.z:G.w,w=fade(f,px)*(f*um<42000.?1.:1.-win);
     if(w>0.){vec3 q=p*f+S,v=vn3(q+.45*sin(q.yzx*1.9))-.5;c*=1.+k*v.x*w;m2=v.y;if(id>.5)sl+=(v-n*dot(v,n))*(k*w);} // (bent out of line, or its grid would show)
   }
   if(wc>0.){
     vec3 u,v,ci,x;                                                  // the lattice of the cells, turned and bent a little so that they do not line up in rows
     if(DEEP>.5){ci=CI;x=CF+M*(DP*F);x+=.3*sin(PH+1.3*x.yzx);}       // (from the script's exact figures, when a float no longer reaches)
     else{x=M*(p*F)+S;ci=floor(x);x=x-ci+.3*sin(x.yzx*1.3);}
-    vec2 k=cells(ci,x,u,v);vec3 q=-v,nl=M*n;                        // q: where in its cell this is, from the cell's middle; nl: the way the surface faces, in the lattice
+    vec3 hc;vec2 k=cells(ci,x,u,v,hc);vec3 q=-v,nl=M*n,ul=u;        // q: where in its cell this is, from the cell's middle; nl: the way the surface faces, in the lattice; ul: the way to the wall, likewise
     float a=fm*px,wall=clamp((W.x-k.x)/a+.5,0.,1.)*min(1.,2.*W.x/a);
-    c*=(1.+.34*(k.y-.5)*wc)*(1.-W.y*wall*wc);                       // some cells hold more colour than others
+    c*=1.+.34*(k.y-.5)*wc;vec3 c0=c;c*=1.-W.y*wall*wc;              // some cells hold more colour than others (c0: the cell's own colour, before its walls are drawn on)
     u=u*M;v=v*M;v-=n*dot(v,n);sl+=v*(W.z*wc);                       // and each one bulges a little
     if(id<.5){
       float rim=1.-smoothstep(0.,.4,k.x),ws=fade(8000.,px);
@@ -910,12 +1074,17 @@ void fineness(vec3 p,vec3 n,float px,float id,float cov,float fz,inout vec3 c,in
       c=mix(c,vec3(1.,.93,.78),(.14*rim+.3*wall)*wc);               // the colour is in the middle of each; their walls show as pale lines
       sl-=(u-n*dot(u,n))*(.5*wall*wc);                              // and lie in the creases between
     }
+    if(win>0.){                                                     // and further in still, what is inside them
+      vec3 u2,v2,h2;float under=cells(ci,x-nl*.3,u2,v2,h2).x;vec4 I;
+      if(id<.5||id>1.5&&id<3.5)I=inside(q,nl,ul,k.x,hc,um,a*um,id,c0,M*lm,under);else I=dead(q,nl,ul,k.x,hc,um,a*um,id,under);
+      c=mix(c,I.rgb,I.a*wc);sl*=1.-I.a*wc;
+    }
   }
   if(id<.5){ // the fuzz, a layer at a time: three of fine underfur, then two of longer, stouter hairs over it. R turns each layer's cells, so that no two line up.
     float dn=.35+.6*fz,f=70.,w=1.3e-4;mat3 R=mat3(1.); // (rubbed thin in places, matted where juice has run)
     for(int i=0;i<5;i++){
       if(i==3){f=30.;w=2.2e-4;}
-      float wt=smoothstep(.12,.4,w/px),k,sh;vec3 e;
+      float wt=smoothstep(.12,.4,w/px)*smoothstep(1.7e-6,7e-6,px),k,sh;vec3 e; // (further in, the view is focused below them, and they are gone)
       if(wt>0.){
         vec3 ci=vec3(0.),x=R*(p*f)+S+4.*float(i);if(DEEP>.5){ci=HI[i];x=HF[i]+R*(DP*f);}
         float m=hair(ci,x,R*n,R*vec3(.35,-1.1,.25),w*f,px*f,dn,k,e,sh)*wt;
@@ -981,12 +1150,13 @@ void main(){
     col=mix(col,vec3(.70,.22,.14),.5*f*smoothstep(.4,.6,vn(p*5.+S+3.))); // flesh still clinging in some of the furrows
     spe=.1;shn=10.;
   }
-  vec3 n=bump(p,g,id,px);
+  vec3 n=bump(p,g,id,px),lm=L;
 #ifdef FINE
-  if(px<.0033){ // under the glass: never in the normal view, where a pixel is wider than this. (A pixel covers more of a surface seen from the side.)
-    vec3 sl=vec3(0.);fineness(p,g,px/max(.25,-dot(g,rd)),id,cov,fz,col,sl,spe);n=normalize(n-sl);
-  }
   mu=1.-smoothstep(1.2e-5,6e-5,px); // far enough in, the day's light gives way to the lamp of a microscope: the same on every part of the peach, lit side or dark
+  if(mu>0.){vec3 tx=normalize(C[0]-g*dot(C[0],g)+1e-4*C[1]);lm=normalize(-.5*tx+.55*cross(g,tx)+.67*g);} // the lamp: up and to the left of the screen, wherever on the peach this is
+  if(px<.0033){ // under the glass: never in the normal view, where a pixel is wider than this. (A pixel covers more of a surface seen from the side.)
+    vec3 sl=vec3(0.);fineness(p,g,px/max(.25,-dot(g,rd)),id,cov,fz,lm,col,sl,spe);n=normalize(n-sl);
+  }
 #endif
   float ndl=dot(n,L),dif=clamp(ndl,0.,1.),ndv=clamp(-dot(n,rd),0.,1.),sh=1.,occ=1.,thin=dif;vec3 alb=col;
 #ifndef LITE
@@ -1000,10 +1170,7 @@ void main(){
     +pow(clamp(dot(n,normalize(L-rd)),0.,1.),shn)*spe*sh
     +pow(1.-ndv,3.)*vec3(.3,.22,.2)*occ
     +fz*vec3(.95,.85,.75)*(.07+.33*pow(1.-ndv,2.5))*(.3+.7*clamp(ndl*.5+.5,0.,1.))*occ; // fuzz: a pale haze, brightest edge-on
-  if(mu>0.){ // the lamp: up and to the left of the screen, wherever on the peach this is
-    vec3 tx=normalize(C[0]-g*dot(C[0],g)+1e-4*C[1]),lm=normalize(-.5*tx+.55*cross(g,tx)+.67*g);
-    col=mix(col,alb*(vec3(.5,.49,.48)+vec3(.62,.6,.56)*clamp(dot(n,lm),0.,1.))+pow(clamp(dot(n,normalize(lm-rd)),0.,1.),shn)*spe+wet*.2*pow(1.-ndv,4.),mu);
-  }
+  if(mu>0.)col=mix(col,alb*(vec3(.5,.49,.48)+vec3(.62,.6,.56)*clamp(dot(n,lm),0.,1.))+pow(clamp(dot(n,normalize(lm-rd)),0.,1.),shn)*spe+wet*.2*pow(1.-ndv,4.),mu);
   col=mix(col,mix(col,vec3(1.,.93,.84),.5)*(.4+.6*clamp(ndl*.5+.5,0.,1.)),halo);
   gl_FragColor=vec4(col*a,a);
 }`;
@@ -1212,9 +1379,9 @@ const pixel = new Uint8Array(4);
 // lies at the middle of the peach's seat: (0, 0) in the normal view, and never further from it than still lets the picture close back to normal as zoom
 // falls to 1. zto: the zoom it is on its way to, about the point (zx, zy) of the screen. A GPU's arithmetic can follow the surface down to where the
 // screen is some ten cells of the skin across (zdeep); further in, the script finds the middle of the screen for it (aim, deep), and the view goes on
-// to where a pixel is about a nine-millionth of the peach's radius: four nanometres or so on a real peach, where a membrane is a line two pixels thick.
+// to where a pixel is about a seventeen-millionth of the peach's radius: two nanometres or so on a real peach, where the two leaflets of a membrane part.
 let zoom = 1, cx = 0, cy = 0, zto = 1, zx = 0, zy = 0, deep = false;
-const zmax = () => lite ? 6 : glassy < 0 ? 40 : 1.79e7 / clamp(seat.clientWidth, 100, 420); // (without the fine detail there is nothing further in to see)
+const zmax = () => lite ? 6 : glassy < 0 ? 40 : 3.45e7 / clamp(seat.clientWidth, 100, 420); // (without the fine detail there is nothing further in to see)
 const zdeep = () => 197 * Math.max(W, H) / (seat.getBoundingClientRect().width || 1);
 const bound = () => { const m = 1 - 1 / zoom; cx = clamp(cx, -.8 * m, .8 * m); cy = clamp(cy, -.87 * m, .95 * m); }; // the picture's own edges: fruit, stem and leaf
 const uvAt = (x, y) => { const r = seat.getBoundingClientRect(), k = 2 / (r.width * zoom); return [cx + (x - r.left - r.width / 2) * k, cy + (r.top + r.height / 2 - y) * k]; }; // the point of the normal picture that shows at a point of the screen
