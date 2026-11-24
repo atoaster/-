@@ -929,8 +929,8 @@ vec4 inside(vec3 q,vec3 nl,vec3 ul,vec2 dw,vec4 w2,vec3 r,float um,float A,float
   float tc=(fleshy?.9+1.4*w3.x+4.*(1.-smoothstep(.015,.055,abs(w3.y))):(leafy?5.:3.6)*(1.+1.1*w3.x+.2*w4.x))+1.2*(1.-smoothstep(0.,2.5,d)),inC=smoothstep(-.7,.7,tc-zf),cy=(tc-zf)*.67; // cy: how far inside it, more or less
   rel+=(.05*k9.x*(1.-smoothstep(.03,.2,A))+.03*w4.y)*inC;
   // the nucleus: a ball that the plane in focus passes through, above its middle
-  vec2 pn=vec2(dot(r-.5,ta),dot(r-.5,tb))*.3*um,vn2=U-pn;float Rn=fleshy?4.2:leafy?2.8:3.3,cn=0.;
-  if(min(dr-dot(pn-U,u1),d2-dot(pn-U,u2))>Rn+wh){ // (clear of the side walls, or this cell has none to show)
+  vec2 pn=vec2(dot(r-.5,ta),dot(r-.5,tb))*.3*um,vn2=U-pn;float Rn=fleshy?4.2:leafy?2.8:3.3,cn=0.;bool nuc=min(dr-dot(pn-U,u1),d2-dot(pn-U,u2))>Rn+wh;
+  if(nuc){ // (clear of the side walls, or this cell has none to show)
     float rn=length(vn2),rho=rn/Rn,zs=sqrt(max(1.-rho*rho,0.)),b=.75*A+.5*Rn*abs(zs-.6),nu=length(vn2-(r.zx-.5)*Rn*.7)/(.3*Rn);cn=1.-smoothstep(-b,b,rn-Rn); // (in focus where the plane meets its surface, and out of it above and below)
     vec3 k1=vn3(vec3(vn2/Rn,zs)*3.3+r*7.);
     if(cn>0.&&em<1.){
@@ -975,12 +975,12 @@ vec4 inside(vec3 q,vec3 nl,vec3 ul,vec2 dw,vec4 w2,vec3 r,float um,float A,float
         else if(h.z>.85){dn=.5;mu=vec3(0.,.02,.1);}                                                                                 // a drop of oil (the rest are peroxisomes)
         ab+=mu*th*(1.+tx);rel+=dn*dot(nx,Lr)*cov*(.3+.7*fo);
       }
-      if(em>0.&&abs(zb)<dm.z){ // sliced: e is how far inside its outline this is, where the slice passes through it; ae how soft that outline is, cut aslant
-        float zr=zb/dm.z,sq=sqrt(1.-zr*zr),e=dm.y*sq-rr,ae=A+.05*abs(zr)/sq,ec=smoothstep(-.75*ae,.75*ae,e)*clr,env=mem(e,ae),inr=smoothstep(.04,.09,e),di;vec3 ti=vec3(1.);
-        cy=max(cy,(e+.3)*clr);
+      if(em>0.&&abs(zb)<dm.z&&clr>.5&&!(nuc&&length(c+vn2)<.8*Rn+dm.x+dm.y+.2)){ // sliced (and two things cannot be in one place in a slice: none lies across the nucleus): e is how far inside its outline this is, where the slice passes through it; ae how soft that outline is, cut aslant
+        float zr=zb/dm.z,sq=sqrt(1.-zr*zr),e=dm.y*sq-rr,ae=A+.05*abs(zr)/sq,ec=smoothstep(-.75*ae,.75*ae,e),env=mem(e,ae),inr=smoothstep(.04,.09,e),di;vec3 ti=vec3(1.);
+        cy=max(cy,e+.3);
         if(big){env=max(env,mem(e-.022,ae)); // a plastid has two membranes round it
           if(leafy){di=.42+.1*k9.x;ti=vec3(.78,1.,.66);                                                                             // a chloroplast: its membranes run from end to end of it, single, and here and there pressed together in stacks, the grana
-            if(dm.x>0.){float yl=P.y+.05*sin(P.x*5.+h.x*6.),gx=P.x/.5+h.y*7.,gy=yl/.3+h.x*3.;                                        // (on edge they are seen from the side;
+            if(dm.x>0.){float yl=P.y+.05*sin(P.x*5.+h.x*6.),gy=yl/.3+h.x*3.,gx=P.x/(.42+.3*fract(floor(gy)*.37+h.y))+fract(floor(gy)*.618+h.x)*5.;                                        // (on edge they are seen from the side;
               di+=.45*line((fract(yl/.1)-.5)*.1,.014,A)*inr;
               di=mix(di,.8+.4*sin(yl*349.)*finer,edge((.42-abs(fract(gx)-.5))*.5,A)*edge((.4-abs(fract(gy)-.5))*.3,A)*step(h3(vec3(floor(gx),floor(gy),h.z*91.)).z,.65)*inr);
             }else di+=.4*beads(P*2.6+h.xy*9.,fl+.5,.6,.25,nb)*inr;                                                                  // lying flat, from above: the grana are dark discs)
@@ -993,7 +993,7 @@ vec4 inside(vec3 q,vec3 nl,vec3 ul,vec2 dw,vec4 w2,vec3 r,float um,float A,float
           di=mix(di,.14,line(ph,.02,A)*on)+mem(abs(ph)-.011,A)*on;
         }else if(h.z<.68){float yy=P.y+.25*P.x*P.x,zz=(fract(yy/.066+.5)-.5)*.066;                                                  // a Golgi stack: half a dozen flat sacs one on another, a little bowed, with nothing round them
           ec*=step(abs(yy),.19)*step(abs(P.x),dm.x+.1)*line(zz,.04,A);di=1.1-line(zz,.02,A);env=0.;
-        }else if(h.z<.85)di=mix(.42+.12*k9.z,.9,edge(.3*dm.y-max(abs(P.x),abs(P.y)),A)*step(h2.x,.5));                              // a peroxisome: one membrane round a grainy matrix, sometimes with a crystal at its heart
+        }else if(h.z<.85)di=mix(.42+.12*k9.z,.85,(1.-smoothstep(.2,.42,length(P)/dm.y+.5*k9.x))*step(h2.x,.5));                        // a peroxisome: one membrane round a grainy matrix, sometimes with a denser heart
         else{di=.3+.3*(1.-smoothstep(0.,.04,e));env=0.;}                                                                            // a drop of oil: no membrane, evenly grey
         di+=1.1*env;bdn=bdn*(1.-ec)+di*ec;sol=sol*(1.-ec)+ec;tn=tn*(1.-ec)+ti*ec;
       }
@@ -1589,7 +1589,7 @@ function onScroll() {
 // The peach's layer has no text in it, so the block under the peach is kept as tall as the text under its spot: then both layers centre alike.
 const level = () => under.style.height = (trivia.offsetHeight ? trivia : h1).getBoundingClientRect().bottom - h1.getBoundingClientRect().top + 'px'; // from the top of the heading to the bottom of whatever comes last
 if (window.ResizeObserver) for (const e of [h1, trivia]) new ResizeObserver(level).observe(e);
-let dpr = 1; const DETAIL = 1.2; // measured: a screenful of peach costs twice what the normal view's canvas does, pixel for pixel, and the fine detail little more
+let dpr = 1; const DETAIL = 1.8; // measured: a screenful of peach costs twice what the normal view's canvas does, pixel for pixel, and with the fine detail nearly as much again
 function fit() { // sizes the peach canvas, and says whether that changed it
   // A peach that would take this GPU more than 8 ms a frame is rendered with fewer pixels, enough to take 6, and stretched back to size by CSS. Zoomed in
   // on, when it is drawn over the whole screen, that can be a good many fewer (and then they come in steps, or the canvas would be made anew every frame);
